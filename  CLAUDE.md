@@ -30,3 +30,6 @@
 - **Data Integrity**: Ensure 100% data consistency for book orders and payment status (reflecting SI experience).
 - **Error Handling**: Use structured exception handling for external API calls (Sweetbook/OpenAI).
 - **Documentation**: All API endpoints must have clear docstrings for Swagger UI.
+- **Async First**: Always prefer `async def` for API endpoints and service methods to leverage FastAPI's performance.
+- **Dependency Injection**: Use FastAPI's `Depends` for database sessions and service class instantiation.
+- **Logging**: Implement structured logging with trace IDs to track requests flowing from AI generation to Sweetbook API.
