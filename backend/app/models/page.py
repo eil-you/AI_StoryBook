@@ -3,13 +3,13 @@ from typing import TYPE_CHECKING
 from sqlalchemy import ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.models.base import Base
+from app.models.base import Base, TimestampMixin
 
 if TYPE_CHECKING:
     from app.models.book import Book
 
 
-class Page(Base):
+class Page(TimestampMixin, Base):
     __tablename__ = "pages"
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
