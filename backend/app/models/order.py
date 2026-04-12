@@ -1,4 +1,3 @@
-import enum
 from datetime import datetime
 from typing import TYPE_CHECKING
 
@@ -6,16 +5,11 @@ from sqlalchemy import DateTime, Enum, ForeignKey, Numeric, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
+from app.models.enums import OrderStatus
 
 if TYPE_CHECKING:
     from app.models.book import Book
     from app.models.user import User
-
-
-class OrderStatus(str, enum.Enum):
-    pending = "pending"
-    paid = "paid"
-    failed = "failed"
 
 
 class Order(Base):

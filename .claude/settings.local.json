@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(.venv/Scripts/pip install:*)",
+      "Bash(.venv/Scripts/python -c \"import pytest, pytest_asyncio, httpx; print\\('OK'\\)\")",
+      "Bash(.venv/Scripts/pytest --tb=short -q)",
+      "Bash(.venv/Scripts/python -m pytest tests/test_main.py -v)",
+      "Bash(.venv/Scripts/python -m pytest tests/ -v)",
+      "Read(//c/Users/yubin/.claude/**)",
+      "Read(//c/Users/yubin/**)",
+      "Read(//c/Users/yubin/OneDrive/**)"
+    ]
+  }
+}
