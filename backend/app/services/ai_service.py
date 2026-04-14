@@ -1,3 +1,4 @@
+import asyncio
 import logging
 
 from openai import APIStatusError, APITimeoutError, AsyncOpenAI, RateLimitError
@@ -24,10 +25,21 @@ You MUST respond with valid JSON only, in this exact format:
 The pages array must have exactly 5 or 6 paragraphs. Each paragraph becomes one page of the book.
 Do not include any text outside the JSON object."""
 
+_IMAGE_STYLE = (
+    "anime-style children's book illustration, vibrant and colorful, "
+    "cute anime art style, expressive characters, detailed background, "
+    "warm lighting, soft cel shading, age-appropriate, no text"
+)
+
+
+class PageData(BaseModel):
+    text: str
+    image_url: str
+
 
 class StoryData(BaseModel):
     title: str
-    pages: list[str]
+    pages: list[PageData]
 
 
 class StoryGenerationError(Exception):
@@ -39,6 +51,7 @@ class AIService:
         settings = get_settings()
         self._client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
         self._model = settings.OPENAI_MODEL
+        self._image_model = settings.OPENAI_IMAGE_MODEL
 
     async def generate_story(
         self,
@@ -48,14 +61,35 @@ class AIService:
         background: str,
         education: str,
     ) -> StoryData:
-        """주어진 캐릭터 정보로 어린이 동화를 생성합니다.
+        """캐릭터 정보로 어린이 동화와 각 페이지 이미지를 생성합니다.
 
         Raises:
             StoryGenerationError: AI 호출 또는 응답 파싱 실패 시.
         """
         prompt = self._build_prompt(character_name, character_age, genre, background, education)
         raw = await self._call_openai(prompt)
-        return self._parse_response(raw)
+
+        title, page_texts = self._parse_story(raw)
+
+        image_urls = await asyncio.gather(
+            *[
+                self._generate_image(
+                    page_text=text,
+                    character_name=character_name,
+                    background=background,
+                    genre=genre,
+                )
+                for text in page_texts
+            ]
+        )
+
+        return StoryData(
+            title=title,
+            pages=[
+                PageData(text=text, image_url=url)
+                for text, url in zip(page_texts, image_urls)
+            ],
+        )
 
     # ------------------------------------------------------------------
     # Private helpers
@@ -105,14 +139,49 @@ class AIService:
             raise StoryGenerationError("Received empty response from AI service.")
         return content
 
-    def _parse_response(self, raw: str) -> StoryData:
+    def _parse_story(self, raw: str) -> tuple[str, list[str]]:
         try:
-            story = StoryData.model_validate_json(raw)
+            class _RawStory(BaseModel):
+                title: str
+                pages: list[str]
+
+            story = _RawStory.model_validate_json(raw)
         except Exception as e:
-            logger.error("Failed to parse AI response: %s", raw)
+            logger.error("Failed to parse AI story response: %s", raw)
             raise StoryGenerationError("Received malformed response from AI service.") from e
 
         if not (5 <= len(story.pages) <= 6):
             raise StoryGenerationError(f"Expected 5-6 pages, got {len(story.pages)}.")
 
-        return story
+        return story.title, story.pages
+
+    async def _generate_image(
+        self,
+        page_text: str,
+        character_name: str,
+        background: str,
+        genre: str,
+    ) -> str:
+        image_prompt = (
+            f"{_IMAGE_STYLE}, {genre} story set in {background}, "
+            f"main character named {character_name}, scene: {page_text[:200]}"
+        )
+        try:
+            response = await self._client.images.generate(
+                model=self._image_model,
+                prompt=image_prompt,
+                size="1024x1024",
+                quality="standard",
+                n=1,
+            )
+        except APITimeoutError as e:
+            logger.error("Image generation timed out: %s", e)
+            raise StoryGenerationError("Image generation timed out. Please try again.") from e
+        except RateLimitError as e:
+            logger.error("Image generation rate limit exceeded: %s", e)
+            raise StoryGenerationError("Service is temporarily busy. Please try again in a moment.") from e
+        except APIStatusError as e:
+            logger.error("Image generation API error (status=%s): %s", e.status_code, e)
+            raise StoryGenerationError(f"Image generation failed: {e.message}") from e
+
+        return response.data[0].url

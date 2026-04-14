@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from app.services.ai_service import AIService, StoryData, StoryGenerationError
+from app.services.ai_service import AIService, PageData, StoryData, StoryGenerationError
 
 router = APIRouter(prefix="/api/v1/stories", tags=["Stories"])
 
