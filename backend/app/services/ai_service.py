@@ -1,15 +1,13 @@
-import json
 import logging
-from typing import TypedDict
 
-import httpx
 from openai import APIStatusError, APITimeoutError, AsyncOpenAI, RateLimitError
+from pydantic import BaseModel
 
-from app.core.config import settings
+from app.core.config import get_settings
 
 logger = logging.getLogger(__name__)
 
-SYSTEM_PROMPT = """You are a creative children's book author.
+_SYSTEM_PROMPT = """You are a creative children's book author.
 When given story details, generate an engaging and age-appropriate story.
 You MUST respond with valid JSON only, in this exact format:
 {
@@ -27,7 +25,7 @@ The pages array must have exactly 5 or 6 paragraphs. Each paragraph becomes one 
 Do not include any text outside the JSON object."""
 
 
-class StoryData(TypedDict):
+class StoryData(BaseModel):
     title: str
     pages: list[str]
 
@@ -38,10 +36,9 @@ class StoryGenerationError(Exception):
 
 class AIService:
     def __init__(self) -> None:
-        self._client = AsyncOpenAI(
-            api_key=settings.openai_api_key,
-            timeout=httpx.Timeout(60.0, connect=10.0),
-        )
+        settings = get_settings()
+        self._client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+        self._model = settings.OPENAI_MODEL
 
     async def generate_story(
         self,
@@ -51,35 +48,42 @@ class AIService:
         background: str,
         education: str,
     ) -> StoryData:
-        """Call the OpenAI API and return structured story data.
-
-        Args:
-            character_name: Main character's name.
-            character_age: Main character's age.
-            genre: Story genre (e.g. adventure, fantasy).
-            background: Story setting/background (e.g. forest, space).
-            education: Educational value to convey (e.g. kindness, courage).
-
-        Returns:
-            StoryData with a title and a list of 5–6 page paragraphs.
+        """주어진 캐릭터 정보로 어린이 동화를 생성합니다.
 
         Raises:
-            StoryGenerationError: For any AI service or parsing failure.
+            StoryGenerationError: AI 호출 또는 응답 파싱 실패 시.
         """
-        user_message = (
+        prompt = self._build_prompt(character_name, character_age, genre, background, education)
+        raw = await self._call_openai(prompt)
+        return self._parse_response(raw)
+
+    # ------------------------------------------------------------------
+    # Private helpers
+    # ------------------------------------------------------------------
+
+    def _build_prompt(
+        self,
+        character_name: str,
+        character_age: int,
+        genre: str,
+        background: str,
+        education: str,
+    ) -> str:
+        return (
             f"Write a children's story with the following details:\n"
             f"- Main character name: {character_name}\n"
             f"- Main character age: {character_age}\n"
             f"- Genre: {genre}\n"
             f"- Background/Setting: {background}\n"
-            f"- Educational value to convey: {education}\n"
+            f"- Educational value to convey: {education}"
         )
 
+    async def _call_openai(self, user_message: str) -> str:
         try:
             response = await self._client.chat.completions.create(
-                model=settings.openai_model,
+                model=self._model,
                 messages=[
-                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "system", "content": _SYSTEM_PROMPT},
                     {"role": "user", "content": user_message},
                 ],
                 response_format={"type": "json_object"},
@@ -88,40 +92,27 @@ class AIService:
             )
         except APITimeoutError as e:
             logger.error("OpenAI request timed out: %s", e)
-            raise StoryGenerationError(
-                "Story generation timed out. Please try again."
-            ) from e
+            raise StoryGenerationError("Story generation timed out. Please try again.") from e
         except RateLimitError as e:
             logger.error("OpenAI rate limit exceeded: %s", e)
-            raise StoryGenerationError(
-                "Service is temporarily busy. Please try again in a moment."
-            ) from e
+            raise StoryGenerationError("Service is temporarily busy. Please try again in a moment.") from e
         except APIStatusError as e:
             logger.error("OpenAI API error (status=%s): %s", e.status_code, e)
-            raise StoryGenerationError(
-                f"Story generation failed with API error: {e.message}"
-            ) from e
+            raise StoryGenerationError(f"Story generation failed with API error: {e.message}") from e
 
-        raw_content = response.choices[0].message.content
-        if not raw_content:
+        content = response.choices[0].message.content
+        if not content:
             raise StoryGenerationError("Received empty response from AI service.")
+        return content
 
+    def _parse_response(self, raw: str) -> StoryData:
         try:
-            data = json.loads(raw_content)
-        except json.JSONDecodeError as e:
-            logger.error("Failed to parse AI response as JSON: %s", raw_content)
-            raise StoryGenerationError(
-                "Received malformed response from AI service."
-            ) from e
+            story = StoryData.model_validate_json(raw)
+        except Exception as e:
+            logger.error("Failed to parse AI response: %s", raw)
+            raise StoryGenerationError("Received malformed response from AI service.") from e
 
-        if "title" not in data or "pages" not in data:
-            raise StoryGenerationError(
-                "AI response missing required 'title' or 'pages' fields."
-            )
+        if not (5 <= len(story.pages) <= 6):
+            raise StoryGenerationError(f"Expected 5-6 pages, got {len(story.pages)}.")
 
-        if not isinstance(data["pages"], list) or not (5 <= len(data["pages"]) <= 6):
-            raise StoryGenerationError(
-                f"Expected 5-6 pages, got {len(data.get('pages', []))}."
-            )
-
-        return StoryData(title=data["title"], pages=data["pages"])
+        return story
