@@ -513,6 +513,37 @@ class SweetBookProvider(BookProvider):
                 message=f"Unexpected cancel-order response for '{order_uid}': {exc}",
             ) from exc
 
+    async def update_shipping(
+        self,
+        order_uid: str,
+        recipient_name: str,
+        recipient_phone: str,
+        postal_code: str,
+        address1: str,
+        address2: str | None = None,
+        memo: str | None = None,
+    ) -> OrderDto:
+        """Update the shipping address of an order (PATCH /v1/orders/{orderUid}/shipping)."""
+        body: dict = {
+            "recipientName": recipient_name,
+            "recipientPhone": recipient_phone,
+            "postalCode": postal_code,
+            "address1": address1,
+        }
+        if address2 is not None:
+            body["address2"] = address2
+        if memo is not None:
+            body["memo"] = memo
+
+        raw = await self._request("PATCH", f"/orders/{order_uid}/shipping", json=body)
+        try:
+            return OrderDetailResponse.model_validate(raw).data
+        except ValidationError as exc:
+            raise ProviderError(
+                code=ErrorCode.ERR002,
+                message=f"Unexpected update-shipping response for '{order_uid}': {exc}",
+            ) from exc
+
     async def estimate_order(
         self,
         book_uid: str,
