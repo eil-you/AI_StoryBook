@@ -45,6 +45,7 @@ async def generate_story(
         raise HTTPException(status_code=502, detail=str(exc))
 
     book = Book(
+        user_id=1,  # TODO: replace with authenticated user id
         title=story.title,
         content_summary=f"주인공: {body.character_name}({body.character_age}세) / 장르: {body.genre} / 배경: {body.background} / 교육: {body.education}",
         status=BookStatus.draft,
