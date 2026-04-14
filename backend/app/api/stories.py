@@ -8,8 +8,10 @@ from app.models.page import Page
 from app.services.ai_service import AIService, PageData, StoryData, StoryGenerationError
 from app.services.sweetbook_service import (
     SweetBookPublishError,
+    create_sweetbook_book,
     finalize_sweetbook_book,
-    publish_book_to_sweetbook,
+    publish_contents_to_sweetbook,
+    publish_cover_to_sweetbook,
 )
 
 router = APIRouter(prefix="/api/v1/stories", tags=["Stories"])
@@ -23,6 +25,7 @@ class GenerateStoryRequest(BaseModel):
     genre: str = Field(..., min_length=1, max_length=50, description="장르 (예: 모험, 판타지, 일상)")
     background: str = Field(..., min_length=1, max_length=100, description="배경/장소 (예: 숲속, 우주, 바닷속)")
     education: str = Field(..., min_length=1, max_length=100, description="교육적 가치 (예: 용기, 친절, 우정)")
+    book_spec_uid: str = Field(..., description="SweetBook 사양 UID")
 
 
 class GenerateStoryResponse(BaseModel):
@@ -70,12 +73,52 @@ async def generate_story(
     await db.commit()
     await db.refresh(book)
 
+    try:
+        await create_sweetbook_book(
+            book_id=book.id,
+            book_spec_uid=body.book_spec_uid,
+            db=db,
+        )
+    except SweetBookPublishError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
     return GenerateStoryResponse(success=True, message="스토리 생성 완료", book_id=book.id, data=story)
 
 
-class PublishStoryRequest(BaseModel):
-    sweetbook_book_uid: str = Field(..., description="SweetBook DRAFT 책의 UID")
+class PublishCoverRequest(BaseModel):
     cover_template_uid: str = Field(..., description="표지 템플릿 UID")
+
+
+class PublishCoverResponse(BaseModel):
+    success: bool
+    message: str
+    book_id: int
+
+
+@router.post("/{book_id}/publish/cover", response_model=PublishCoverResponse, status_code=201)
+async def publish_cover(
+    book_id: int,
+    body: PublishCoverRequest,
+    db: AsyncSession = Depends(get_db),
+) -> PublishCoverResponse:
+    """DB에 저장된 스토리의 표지 이미지를 SweetBook DRAFT 책에 추가합니다."""
+    try:
+        await publish_cover_to_sweetbook(
+            book_id=book_id,
+            cover_template_uid=body.cover_template_uid,
+            db=db,
+        )
+    except SweetBookPublishError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+    return PublishCoverResponse(
+        success=True,
+        message="SweetBook 표지 퍼블리시 완료",
+        book_id=book_id,
+    )
+
+
+class PublishContentsRequest(BaseModel):
     content_template_uid: str = Field(..., description="내지 콘텐츠 템플릿 UID")
     extra_parameters: dict[str, str] = Field(
         default_factory=dict,
@@ -83,25 +126,23 @@ class PublishStoryRequest(BaseModel):
     )
 
 
-class PublishStoryResponse(BaseModel):
+class PublishContentsResponse(BaseModel):
     success: bool
     message: str
     book_id: int
     page_count: int
 
 
-@router.post("/{book_id}/publish", response_model=PublishStoryResponse, status_code=201)
-async def publish_story(
+@router.post("/{book_id}/publish/contents", response_model=PublishContentsResponse, status_code=201)
+async def publish_contents(
     book_id: int,
-    body: PublishStoryRequest,
+    body: PublishContentsRequest,
     db: AsyncSession = Depends(get_db),
-) -> PublishStoryResponse:
+) -> PublishContentsResponse:
     """DB에 저장된 스토리 페이지(텍스트 + 이미지)를 SweetBook DRAFT 책에 내지로 추가합니다."""
     try:
-        pages = await publish_book_to_sweetbook(
+        pages = await publish_contents_to_sweetbook(
             book_id=book_id,
-            sweetbook_book_uid=body.sweetbook_book_uid,
-            cover_template_uid=body.cover_template_uid,
             content_template_uid=body.content_template_uid,
             extra_parameters=body.extra_parameters,
             db=db,
@@ -109,16 +150,12 @@ async def publish_story(
     except SweetBookPublishError as exc:
         raise HTTPException(status_code=502, detail=str(exc))
 
-    return PublishStoryResponse(
+    return PublishContentsResponse(
         success=True,
-        message="SweetBook 퍼블리시 완료",
+        message="SweetBook 내지 퍼블리시 완료",
         book_id=book_id,
         page_count=len(pages),
     )
-
-
-class FinalizeStoryRequest(BaseModel):
-    sweetbook_book_uid: str = Field(..., description="SweetBook 책의 UID")
 
 
 class FinalizeStoryResponse(BaseModel):
@@ -132,14 +169,12 @@ class FinalizeStoryResponse(BaseModel):
 @router.post("/{book_id}/finalize", response_model=FinalizeStoryResponse, status_code=201)
 async def finalize_story(
     book_id: int,
-    body: FinalizeStoryRequest,
     db: AsyncSession = Depends(get_db),
 ) -> FinalizeStoryResponse:
     """SweetBook DRAFT 책을 FINALIZED 상태로 전환합니다. 주문 생성이 가능해집니다."""
     try:
         data = await finalize_sweetbook_book(
             book_id=book_id,
-            sweetbook_book_uid=body.sweetbook_book_uid,
             db=db,
         )
     except SweetBookPublishError as exc:

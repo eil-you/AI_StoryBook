@@ -2,10 +2,10 @@
 SweetBook publishing pipeline service.
 
 Flow:
-  1. Load Page rows from DB (ordered by page_number).
-  2. Download each page's image from AWS S3 (parallel, boto3 in thread pool).
-  3. POST /v1/books/{book_uid}/contents for every page in parallel,
-     uploading the image as multipart/form-data via SweetBookProvider.
+  1. generate  → AI 스토리 생성 + SweetBook DRAFT 책 생성 (sweetbook_book_uid DB 저장)
+  2. cover     → S3에서 표지 이미지 다운로드 → SweetBook cover API
+  3. contents  → S3에서 페이지 이미지 병렬 다운로드 → SweetBook contents API
+  4. finalize  → SweetBook finalization API → BookStatus.finalized
 """
 
 import asyncio
@@ -131,7 +131,7 @@ async def _download_image(
 
 
 # ---------------------------------------------------------------------------
-# Combined per-page pipeline step
+# Per-page pipeline step
 # ---------------------------------------------------------------------------
 
 
@@ -147,16 +147,11 @@ async def _process_page(
     image_field: str,
     extra_parameters: dict[str, str],
 ) -> ContentData:
-    """Full pipeline for one page: S3 download → SweetBook contents API.
-
-    The image is sent as a multipart file upload alongside the text so that
-    no separate /images pre-upload step is required.
-    """
+    """Full pipeline for one page: S3 download → SweetBook contents API."""
     _, image_bytes = await _download_image(page, bucket, region, aws_access_key_id, aws_secret_access_key)
     filename = f"page_{page.page_number}.png"
     logger.debug("Adding content for page %d to SweetBook book %r", page.page_number, book_uid)
 
-    # extra_parameters 먼저 깔고, 페이지 텍스트로 덮어씀
     parameters = {**extra_parameters, "text": page.text_content or ""}
 
     try:
@@ -173,7 +168,7 @@ async def _process_page(
 
 
 # ---------------------------------------------------------------------------
-# Public entry point
+# Template helper
 # ---------------------------------------------------------------------------
 
 
@@ -181,11 +176,7 @@ async def _get_template_fields(
     provider: SweetBookProvider,
     template_uid: str,
 ) -> tuple[str, str | None]:
-    """Fetch the template once and return (image_field, text_field).
-
-    *image_field* is required — raises ``SweetBookPublishError`` if absent.
-    *text_field* is optional — returns ``None`` if the template has no text parameter.
-    """
+    """Fetch the template once and return (image_field, text_field)."""
     try:
         detail = await provider.get_template(template_uid)
     except ProviderError as exc:
@@ -217,141 +208,95 @@ async def _get_template_fields(
     return image_field, text_field
 
 
-async def finalize_sweetbook_book(
+# ---------------------------------------------------------------------------
+# DB helper
+# ---------------------------------------------------------------------------
+
+
+async def _get_book_with_sweetbook_uid(book_id: int, db: AsyncSession) -> Book:
+    """Load Book from DB and verify sweetbook_book_uid is set."""
+    result = await db.execute(select(Book).where(Book.id == book_id))
+    book: Book | None = result.scalar_one_or_none()
+    if not book:
+        raise SweetBookPublishError(f"Book not found: book_id={book_id}.")
+    if not book.sweetbook_book_uid:
+        raise SweetBookPublishError(
+            f"book_id={book_id} has no sweetbook_book_uid. "
+            "Generate the story first (it creates the SweetBook book automatically)."
+        )
+    return book
+
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+
+
+async def create_sweetbook_book(
     *,
     book_id: int,
-    sweetbook_book_uid: str,
+    book_spec_uid: str,
     db: AsyncSession,
-) -> FinalizationData:
-    """Call the SweetBook finalization endpoint and update the local book status.
+) -> str:
+    """Create a SweetBook DRAFT book and persist its UID on the local Book record.
 
-    Transitions the SweetBook DRAFT book to FINALIZED, then marks the local
-    ``Book`` record as ``finalized``.  The call is idempotent — calling it on
-    an already-finalized book succeeds without error.
-
-    Args:
-        book_id: Primary key of the local ``Book`` record.
-        sweetbook_book_uid: UID of the corresponding SweetBook book.
-        db: Active async database session.
+    Called automatically during story generation.
 
     Returns:
-        ``FinalizationData`` from the SweetBook API.
-
-    Raises:
-        SweetBookPublishError: If the book is not found or the API call fails.
+        The newly created ``sweetbook_book_uid``.
     """
     settings = get_settings()
 
-    book_result = await db.execute(select(Book).where(Book.id == book_id))
-    book: Book | None = book_result.scalar_one_or_none()
+    result = await db.execute(select(Book).where(Book.id == book_id))
+    book: Book | None = result.scalar_one_or_none()
     if not book:
         raise SweetBookPublishError(f"Book not found: book_id={book_id}.")
 
-    page_result = await db.execute(
-        select(Page).where(Page.book_id == book_id)
-    )
-    page_count = len(page_result.scalars().all())
-    _validate_page_count(page_count)
-
     provider = SweetBookProvider(api_key=settings.SWEETBOOK_API_KEY)
     try:
-        logger.info(
-            "Finalizing SweetBook book %r (local book_id=%d, pages=%d)",
-            sweetbook_book_uid,
-            book_id,
-            page_count,
+        data = await provider.create_book(
+            title=book.title,
+            book_spec_uid=book_spec_uid,
+            external_ref=str(book_id),
         )
-        data = await provider.finalize_book(sweetbook_book_uid)
     except ProviderError as exc:
         raise SweetBookPublishError(
-            f"SweetBook finalization API error: {exc.message}"
+            f"SweetBook create-book API error: {exc.message}"
         ) from exc
     finally:
         await provider.close()
 
-    book.status = BookStatus.finalized
+    book.sweetbook_book_uid = data.book_uid
     await db.commit()
     logger.info(
-        "book_id=%d finalized — pageCount=%d, finalizedAt=%s",
-        book_id,
-        data.pageCount,
-        data.finalizedAt,
+        "Created SweetBook book %r for book_id=%d", data.book_uid, book_id
     )
-    return data
+    return data.book_uid
 
 
-async def publish_book_to_sweetbook(
+async def publish_cover_to_sweetbook(
     *,
     book_id: int,
-    sweetbook_book_uid: str,
     cover_template_uid: str,
-    content_template_uid: str,
-    extra_parameters: dict[str, str] | None = None,
     db: AsyncSession,
-) -> list[ContentData]:
-    """Publish all pages of *book_id* to an existing SweetBook DRAFT book.
+) -> None:
+    """Upload the cover image to the SweetBook DRAFT book.
 
-    Steps performed:
-      1. Fetch ``Book`` and ``Page`` rows from the database for *book_id*.
-      2. Add the cover (POST /v1/books/{uid}/cover) using the book's cover_image_url.
-      3. Fetch templates to resolve image field names automatically.
-      4. Download each page image from AWS S3 and POST /v1/books/{uid}/contents in parallel.
-
-    Args:
-        book_id: Primary key of the local ``Book`` record.
-        sweetbook_book_uid: UID of the corresponding DRAFT book in SweetBook.
-        cover_template_uid: Cover template UID.
-        content_template_uid: Content template UID for every interior page.
-        extra_parameters: Extra template parameters applied to every page (e.g. childName).
-        db: Active async database session.
-
-    Returns:
-        List of ``ContentData`` objects from the SweetBook contents API,
-        one entry per page (sorted by page_number).
-
-    Raises:
-        SweetBookPublishError: On any S3, network, or API error.
+    Looks up ``sweetbook_book_uid`` from the local Book record.
     """
     settings = get_settings()
+    book = await _get_book_with_sweetbook_uid(book_id, db)
+    sweetbook_book_uid = book.sweetbook_book_uid
 
-    # 1. Load book + pages from DB
-    book_result = await db.execute(select(Book).where(Book.id == book_id))
-    book: Book | None = book_result.scalar_one_or_none()
-    if not book:
-        raise SweetBookPublishError(f"Book not found: book_id={book_id}.")
-
-    result = await db.execute(
-        select(Page)
-        .where(Page.book_id == book_id)
-        .order_by(Page.page_number)
-    )
-    pages: list[Page] = list(result.scalars().all())
-
-    if not pages:
+    if not book.cover_image_url:
         raise SweetBookPublishError(
-            f"No pages found for book_id={book_id}. Cannot publish."
+            f"book_id={book_id} has no cover_image_url. Generate the story first."
         )
-
-    logger.info(
-        "Publishing book_id=%d (%d pages) to SweetBook book %r",
-        book_id,
-        len(pages),
-        sweetbook_book_uid,
-    )
 
     provider = SweetBookProvider(api_key=settings.SWEETBOOK_API_KEY)
     try:
-        # 2. Add cover
-        if not book.cover_image_url:
-            raise SweetBookPublishError(
-                f"book_id={book_id} has no cover_image_url. Generate the story first."
-            )
+        cover_image_field, cover_text_field = await _get_template_fields(provider, cover_template_uid)
 
-        (cover_image_field, cover_text_field), (image_field, _) = await asyncio.gather(
-            _get_template_fields(provider, cover_template_uid),
-            _get_template_fields(provider, content_template_uid),
-        )
-        logger.info("Downloading cover image from S3 for book_id=%d", book_id)
         cover_key = _parse_s3_key(book.cover_image_url, settings.AWS_S3_BUCKET, settings.AWS_REGION)
         cover_bytes: bytes = await asyncio.to_thread(
             partial(
@@ -371,13 +316,50 @@ async def publish_book_to_sweetbook(
                 parameters=cover_parameters,
                 upload_files={cover_image_field: ("cover.png", cover_bytes, "image/png")},
             )
-            logger.info("Cover added to SweetBook book %r with title %r", sweetbook_book_uid, book.title)
         except ProviderError as exc:
             raise SweetBookPublishError(
                 f"SweetBook cover API error: {exc.message}"
             ) from exc
+    finally:
+        await provider.close()
 
-        # 3–4. Upload pages concurrently
+    logger.info("Cover added to SweetBook book %r (book_id=%d)", sweetbook_book_uid, book_id)
+
+
+async def publish_contents_to_sweetbook(
+    *,
+    book_id: int,
+    content_template_uid: str,
+    extra_parameters: dict[str, str] | None = None,
+    db: AsyncSession,
+) -> list[ContentData]:
+    """Upload all interior pages to the SweetBook DRAFT book.
+
+    Looks up ``sweetbook_book_uid`` from the local Book record.
+    Can be retried independently of the cover step.
+    """
+    settings = get_settings()
+    book = await _get_book_with_sweetbook_uid(book_id, db)
+    sweetbook_book_uid = book.sweetbook_book_uid
+
+    result = await db.execute(
+        select(Page).where(Page.book_id == book_id).order_by(Page.page_number)
+    )
+    pages: list[Page] = list(result.scalars().all())
+
+    if not pages:
+        raise SweetBookPublishError(
+            f"No pages found for book_id={book_id}. Cannot publish contents."
+        )
+
+    logger.info(
+        "Publishing %d pages of book_id=%d to SweetBook book %r",
+        len(pages), book_id, sweetbook_book_uid,
+    )
+
+    provider = SweetBookProvider(api_key=settings.SWEETBOOK_API_KEY)
+    try:
+        image_field, _ = await _get_template_fields(provider, content_template_uid)
         logger.info("Using image field %r from template %r", image_field, content_template_uid)
 
         tasks = [
@@ -399,7 +381,6 @@ async def publish_book_to_sweetbook(
     finally:
         await provider.close()
 
-    # Collect all failed pages, then report them together
     failures = [
         (page, outcome)
         for page, outcome in zip(pages, outcomes)
@@ -417,7 +398,46 @@ async def publish_book_to_sweetbook(
     content_responses: list[ContentData] = list(outcomes)
     logger.info(
         "Successfully published %d pages of book_id=%d to SweetBook.",
-        len(content_responses),
-        book_id,
+        len(content_responses), book_id,
     )
     return content_responses
+
+
+async def finalize_sweetbook_book(
+    *,
+    book_id: int,
+    db: AsyncSession,
+) -> FinalizationData:
+    """Transition the SweetBook DRAFT book to FINALIZED and update local status.
+
+    Looks up ``sweetbook_book_uid`` from the local Book record.
+    """
+    settings = get_settings()
+    book = await _get_book_with_sweetbook_uid(book_id, db)
+    sweetbook_book_uid = book.sweetbook_book_uid
+
+    page_result = await db.execute(select(Page).where(Page.book_id == book_id))
+    page_count = len(page_result.scalars().all())
+    _validate_page_count(page_count)
+
+    provider = SweetBookProvider(api_key=settings.SWEETBOOK_API_KEY)
+    try:
+        logger.info(
+            "Finalizing SweetBook book %r (local book_id=%d, pages=%d)",
+            sweetbook_book_uid, book_id, page_count,
+        )
+        data = await provider.finalize_book(sweetbook_book_uid)
+    except ProviderError as exc:
+        raise SweetBookPublishError(
+            f"SweetBook finalization API error: {exc.message}"
+        ) from exc
+    finally:
+        await provider.close()
+
+    book.status = BookStatus.finalized
+    await db.commit()
+    logger.info(
+        "book_id=%d finalized — pageCount=%d, finalizedAt=%s",
+        book_id, data.pageCount, data.finalizedAt,
+    )
+    return data
