@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import book_specs, books, contents, covers, images, templates
+from app.api import book_specs, books, contents, covers, images, stories, templates
 from app.core.config import get_settings
 
 
@@ -41,6 +41,7 @@ app.include_router(images.router)
 app.include_router(covers.router)
 app.include_router(contents.router)
 app.include_router(templates.router)
+app.include_router(stories.router)
 
 
 @app.get("/health", tags=["Health"])
