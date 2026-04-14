@@ -15,6 +15,19 @@ from app.schemas.book import BookListData, BookListResponse, CreateBookData, Cre
 from app.schemas.content import ContentData, ContentResponse
 from app.schemas.cover import CoverData, CoverResponse
 from app.schemas.finalization import FinalizationData, FinalizationResponse
+from app.schemas.order import (
+    CreateEstimatePayload,
+    CreateOrderPayload,
+    CreateOrderResponse,
+    EstimateDto,
+    EstimateResponse,
+    OrderDto,
+    OrderDetailResponse,
+    OrderItemPayload,
+    OrderListData,
+    OrderListResponse,
+    ShippingPayload,
+)
 from app.schemas.image import PhotoListData, PhotoListResponse, UploadPhotoData, UploadPhotoResponse
 from app.schemas.book_spec import BookSpecDto, BookSpecListResponse, BookSpecResponse
 from app.schemas.template import (
@@ -414,6 +427,114 @@ class SweetBookProvider(BookProvider):
             raise ProviderError(
                 code=ErrorCode.ERR002,
                 message=f"Unexpected photo list response for book '{book_uid}': {exc}",
+            ) from exc
+
+    async def create_order(
+        self,
+        book_uid: str,
+        quantity: int,
+        recipient_name: str,
+        recipient_phone: str,
+        postal_code: str,
+        address1: str,
+        address2: str | None = None,
+        memo: str | None = None,
+        external_ref: str | None = None,
+    ) -> OrderDto:
+        """Create an order for a FINALIZED book (credits deducted immediately)."""
+        try:
+            payload = CreateOrderPayload(
+                items=[OrderItemPayload(bookUid=book_uid, quantity=quantity)],
+                shipping=ShippingPayload(
+                    recipientName=recipient_name,
+                    recipientPhone=recipient_phone,
+                    postalCode=postal_code,
+                    address1=address1,
+                    address2=address2,
+                    memo=memo,
+                ),
+                externalRef=external_ref,
+            )
+        except ValidationError as exc:
+            raise ProviderError(
+                code=ErrorCode.ERR001,
+                message=f"Order payload validation failed: {exc}",
+            ) from exc
+
+        raw = await self._post("/orders", payload.model_dump(exclude_none=True))
+        try:
+            return CreateOrderResponse.model_validate(raw).data
+        except ValidationError as exc:
+            raise ProviderError(
+                code=ErrorCode.ERR002,
+                message=f"Unexpected create-order response: {exc}",
+            ) from exc
+
+    async def list_orders(
+        self,
+        status: int | None = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> OrderListData:
+        """Fetch a paginated list of orders with optional status filter."""
+        params: dict[str, int] = {"limit": limit, "offset": offset}
+        if status is not None:
+            params["status"] = status
+
+        raw = await self._get("/orders", params=params)
+        try:
+            return OrderListResponse.model_validate(raw).data
+        except ValidationError as exc:
+            raise ProviderError(
+                code=ErrorCode.ERR002,
+                message=f"Unexpected orders list response: {exc}",
+            ) from exc
+
+    async def get_order(self, order_uid: str) -> OrderDto:
+        """Fetch a single order by its UID."""
+        raw = await self._get(f"/orders/{order_uid}")
+        try:
+            return OrderDetailResponse.model_validate(raw).data
+        except ValidationError as exc:
+            raise ProviderError(
+                code=ErrorCode.ERR002,
+                message=f"Unexpected order detail response for '{order_uid}': {exc}",
+            ) from exc
+
+    async def cancel_order(self, order_uid: str) -> OrderDto:
+        """Cancel a PAID or PDF_READY order."""
+        raw = await self._post(f"/orders/{order_uid}/cancel", {})
+        try:
+            return OrderDetailResponse.model_validate(raw).data
+        except ValidationError as exc:
+            raise ProviderError(
+                code=ErrorCode.ERR002,
+                message=f"Unexpected cancel-order response for '{order_uid}': {exc}",
+            ) from exc
+
+    async def estimate_order(
+        self,
+        book_uid: str,
+        quantity: int,
+    ) -> EstimateDto:
+        """Preview the total cost before placing an order."""
+        try:
+            payload = CreateEstimatePayload(
+                items=[{"bookUid": book_uid, "quantity": quantity}]
+            )
+        except ValidationError as exc:
+            raise ProviderError(
+                code=ErrorCode.ERR001,
+                message=f"Estimate payload validation failed: {exc}",
+            ) from exc
+
+        raw = await self._post("/orders/estimate", payload.model_dump())
+        try:
+            return EstimateResponse.model_validate(raw).data
+        except ValidationError as exc:
+            raise ProviderError(
+                code=ErrorCode.ERR002,
+                message=f"Unexpected estimate response: {exc}",
             ) from exc
 
     async def get_pricing(self, page_count: int) -> Decimal:
