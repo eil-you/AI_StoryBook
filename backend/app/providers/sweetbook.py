@@ -20,6 +20,7 @@ from app.schemas.order import (
     CreateOrderPayload,
     CreateOrderResponse,
     EstimateDto,
+    EstimateItemPayload,
     EstimateResponse,
     OrderDto,
     OrderDetailResponse,
@@ -444,7 +445,7 @@ class SweetBookProvider(BookProvider):
         """Create an order for a FINALIZED book (credits deducted immediately)."""
         try:
             payload = CreateOrderPayload(
-                items=[OrderItemPayload(bookUid=book_uid, quantity=quantity)],
+                items=[OrderItemPayload(book_id=book_uid, quantity=quantity)],
                 shipping=ShippingPayload(
                     recipientName=recipient_name,
                     recipientPhone=recipient_phone,
@@ -520,7 +521,7 @@ class SweetBookProvider(BookProvider):
         """Preview the total cost before placing an order."""
         try:
             payload = CreateEstimatePayload(
-                items=[{"bookUid": book_uid, "quantity": quantity}]
+                items=[EstimateItemPayload(book_id=book_uid, quantity=quantity)]
             )
         except ValidationError as exc:
             raise ProviderError(
@@ -530,7 +531,7 @@ class SweetBookProvider(BookProvider):
 
         raw = await self._post("/orders/estimate", payload.model_dump())
         try:
-            return EstimateResponse.model_validate(raw).data
+            return EstimateResponse.model_validate(raw).data  # type: ignore[return-value]
         except ValidationError as exc:
             raise ProviderError(
                 code=ErrorCode.ERR002,
