@@ -445,7 +445,7 @@ class SweetBookProvider(BookProvider):
         """Create an order for a FINALIZED book (credits deducted immediately)."""
         try:
             payload = CreateOrderPayload(
-                items=[OrderItemPayload(book_id=book_uid, quantity=quantity)],
+                items=[OrderItemPayload(bookUid=book_uid, quantity=quantity)],
                 shipping=ShippingPayload(
                     recipientName=recipient_name,
                     recipientPhone=recipient_phone,
@@ -521,7 +521,7 @@ class SweetBookProvider(BookProvider):
         """Preview the total cost before placing an order."""
         try:
             payload = CreateEstimatePayload(
-                items=[EstimateItemPayload(book_id=book_uid, quantity=quantity)]
+                items=[EstimateItemPayload(bookUid=book_uid, quantity=quantity)]
             )
         except ValidationError as exc:
             raise ProviderError(

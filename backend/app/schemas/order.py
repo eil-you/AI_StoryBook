@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field
 
 
 class OrderItemPayload(BaseModel):
-    book_id: str
+    bookUid: str
     quantity: int = Field(..., ge=1, le=100)
 
 
@@ -100,7 +100,7 @@ class OrderDetailResponse(BaseModel):
 
 
 class EstimateItemPayload(BaseModel):
-    book_id: str
+    bookUid: str
     quantity: int = Field(..., ge=1, le=100)
 
 
