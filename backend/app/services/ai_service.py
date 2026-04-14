@@ -18,11 +18,10 @@ You MUST respond with valid JSON only, in this exact format:
     "Paragraph 1 text...",
     "Paragraph 2 text...",
     ...
-    "Paragraph 24 text..."
   ]
 }
-The pages array must have exactly 24 paragraphs. Each paragraph becomes one page of the book.
-Keep each paragraph short (2-4 sentences) so the story flows naturally across 24 pages.
+The pages array must have between 24 and 30 paragraphs to tell a complete story.
+Keep each paragraph short (2-4 sentences) so the story flows naturally page by page.
 Do not include any text outside the JSON object."""
 
 _IMAGE_STYLE = (
@@ -161,8 +160,8 @@ class AIService:
             logger.error("Failed to parse AI story response: %s", raw)
             raise StoryGenerationError("Received malformed response from AI service.") from e
 
-        if len(story.pages) != 24:
-            raise StoryGenerationError(f"Expected 24 pages, got {len(story.pages)}.")
+        if not (24 <= len(story.pages) <= 30):
+            raise StoryGenerationError(f"Expected 24–30 pages, got {len(story.pages)}.")
 
         return story.title, story.pages
 

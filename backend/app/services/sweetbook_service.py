@@ -43,17 +43,18 @@ class SweetBookPublishError(Exception):
 # ---------------------------------------------------------------------------
 
 _PAGE_MIN = 24
-_PAGE_MAX = 24
+_PAGE_MAX = 30
 _PAGE_INCREMENT = 2
 
 
 def _validate_page_count(page_count: int) -> None:
     """Raise ``SweetBookPublishError`` if *page_count* violates BookSpec rules.
 
-    Rules (pageMin=24, pageMax=24, pageIncrement=2):
+    Rules (pageMin=24, pageMax=30, pageIncrement=2):
       - page_count >= _PAGE_MIN
       - page_count <= _PAGE_MAX
       - (page_count - _PAGE_MIN) % _PAGE_INCREMENT == 0
+    Valid counts: 24, 26, 28, 30
     """
     if page_count < _PAGE_MIN:
         raise SweetBookPublishError(
@@ -65,8 +66,8 @@ def _validate_page_count(page_count: int) -> None:
         )
     if (page_count - _PAGE_MIN) % _PAGE_INCREMENT != 0:
         raise SweetBookPublishError(
-            f"Page count {page_count} is not a valid increment "
-            f"(must be a multiple of {_PAGE_INCREMENT} from {_PAGE_MIN})."
+            f"Page count {page_count} is not a valid increment. "
+            f"Valid counts: 24, 26, 28, 30."
         )
 
 
