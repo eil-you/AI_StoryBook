@@ -10,6 +10,11 @@ class Settings(BaseSettings):
     OPENAI_IMAGE_MODEL: str = "dall-e-3"
     DATABASE_URL: str = "sqlite:///./storybook.db"
 
+    AWS_ACCESS_KEY_ID: str
+    AWS_SECRET_ACCESS_KEY: str
+    AWS_REGION: str = "ap-northeast-2"
+    AWS_S3_BUCKET: str
+
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
 
