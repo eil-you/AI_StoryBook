@@ -20,7 +20,7 @@ You MUST respond with valid JSON only, in this exact format:
     ...
   ]
 }
-The pages array must have between 24 and 30 paragraphs to tell a complete story.
+The pages array MUST have between 24 and 30 paragraphs. This is a hard requirement — do NOT return fewer than 24 paragraphs under any circumstances.
 Keep each paragraph short (2-4 sentences) so the story flows naturally page by page.
 Do not include any text outside the JSON object."""
 
@@ -67,9 +67,17 @@ class AIService:
             StoryGenerationError: AI 호출 또는 응답 파싱 실패 시.
         """
         prompt = self._build_prompt(character_name, character_age, genre, background, education)
-        raw = await self._call_openai(prompt)
 
-        title, page_texts = self._parse_story(raw)
+        title, page_texts = None, None
+        for attempt in range(3):
+            raw = await self._call_openai(prompt)
+            try:
+                title, page_texts = self._parse_story(raw)
+                break
+            except StoryGenerationError as exc:
+                if attempt == 2:
+                    raise
+                logger.warning("Story parse failed (attempt %d/3): %s — retrying", attempt + 1, exc)
 
         all_urls = await asyncio.gather(
             self._generate_cover_image(
@@ -209,6 +217,7 @@ class AIService:
             f"{_IMAGE_STYLE}, {genre} story set in {background}, "
             f"main character named {character_name}, scene: {page_text[:200]}"
         )
+        await asyncio.sleep(13)
         try:
             response = await self._client.images.generate(
                 model=self._image_model,
