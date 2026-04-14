@@ -17,13 +17,12 @@ You MUST respond with valid JSON only, in this exact format:
   "pages": [
     "Paragraph 1 text...",
     "Paragraph 2 text...",
-    "Paragraph 3 text...",
-    "Paragraph 4 text...",
-    "Paragraph 5 text...",
-    "Paragraph 6 text..."
+    ...
+    "Paragraph 24 text..."
   ]
 }
-The pages array must have exactly 5 or 6 paragraphs. Each paragraph becomes one page of the book.
+The pages array must have exactly 24 paragraphs. Each paragraph becomes one page of the book.
+Keep each paragraph short (2-4 sentences) so the story flows naturally across 24 pages.
 Do not include any text outside the JSON object."""
 
 _IMAGE_STYLE = (
@@ -40,6 +39,7 @@ class PageData(BaseModel):
 
 class StoryData(BaseModel):
     title: str
+    cover_image_url: str
     pages: list[PageData]
 
 
@@ -72,7 +72,13 @@ class AIService:
 
         title, page_texts = self._parse_story(raw)
 
-        image_urls = await asyncio.gather(
+        all_urls = await asyncio.gather(
+            self._generate_cover_image(
+                title=title,
+                character_name=character_name,
+                background=background,
+                genre=genre,
+            ),
             *[
                 self._generate_image(
                     page_text=text,
@@ -84,11 +90,15 @@ class AIService:
             ]
         )
 
+        cover_image_url = all_urls[0]
+        page_image_urls = all_urls[1:]
+
         return StoryData(
             title=title,
+            cover_image_url=cover_image_url,
             pages=[
                 PageData(text=text, image_url=url)
-                for text, url in zip(page_texts, image_urls)
+                for text, url in zip(page_texts, page_image_urls)
             ],
         )
 
@@ -123,7 +133,7 @@ class AIService:
                 ],
                 response_format={"type": "json_object"},
                 temperature=0.8,
-                max_tokens=2000,
+                max_tokens=4000,
             )
         except APITimeoutError as e:
             logger.error("OpenAI request timed out: %s", e)
@@ -151,10 +161,43 @@ class AIService:
             logger.error("Failed to parse AI story response: %s", raw)
             raise StoryGenerationError("Received malformed response from AI service.") from e
 
-        if not (5 <= len(story.pages) <= 6):
-            raise StoryGenerationError(f"Expected 5-6 pages, got {len(story.pages)}.")
+        if len(story.pages) != 24:
+            raise StoryGenerationError(f"Expected 24 pages, got {len(story.pages)}.")
 
         return story.title, story.pages
+
+    async def _generate_cover_image(
+        self,
+        title: str,
+        character_name: str,
+        background: str,
+        genre: str,
+    ) -> str:
+        image_prompt = (
+            f"{_IMAGE_STYLE}, {genre} children's book cover, "
+            f"{background} setting, main character named {character_name}, "
+            f"book title theme: {title}, dramatic and eye-catching composition"
+        )
+        try:
+            response = await self._client.images.generate(
+                model=self._image_model,
+                prompt=image_prompt,
+                size="1024x1024",
+                quality="standard",
+                n=1,
+            )
+        except APITimeoutError as e:
+            logger.error("Cover image generation timed out: %s", e)
+            raise StoryGenerationError("Cover image generation timed out. Please try again.") from e
+        except RateLimitError as e:
+            logger.error("Cover image generation rate limit exceeded: %s", e)
+            raise StoryGenerationError("Service is temporarily busy. Please try again in a moment.") from e
+        except APIStatusError as e:
+            logger.error("Cover image generation API error (status=%s): %s", e.status_code, e)
+            raise StoryGenerationError(f"Cover image generation failed: {e.message}") from e
+
+        dalle_url = response.data[0].url
+        return await download_and_save(dalle_url)
 
     async def _generate_image(
         self,

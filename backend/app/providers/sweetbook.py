@@ -14,10 +14,12 @@ from app.providers.base import (
 from app.schemas.book import BookListData, BookListResponse, CreateBookData, CreateBookResponse
 from app.schemas.content import ContentData, ContentResponse
 from app.schemas.cover import CoverData, CoverResponse
+from app.schemas.finalization import FinalizationData, FinalizationResponse
 from app.schemas.image import PhotoListData, PhotoListResponse, UploadPhotoData, UploadPhotoResponse
 from app.schemas.book_spec import BookSpecDto, BookSpecListResponse, BookSpecResponse
 from app.schemas.template import (
     TemplateDetailDto,
+    TemplateDetailResponse,
     TemplateListData,
     TemplateListResponse,
 )
@@ -105,10 +107,7 @@ class SweetBookProvider(BookProvider):
     ) -> None:
         self._client = client or httpx.AsyncClient(
             base_url=_BASE_URL,
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            },
+            headers={"Authorization": f"Bearer {api_key}"},
             timeout=30.0,
         )
 
@@ -292,7 +291,7 @@ class SweetBookProvider(BookProvider):
         """Fetch the full detail of a single template by its UID."""
         raw = await self._get(f"/templates/{template_uid}")
         try:
-            return TemplateDetailDto.model_validate(raw)
+            return TemplateDetailResponse.model_validate(raw).data
         except ValidationError as exc:
             raise ProviderError(
                 code=ErrorCode.ERR002,
@@ -389,6 +388,21 @@ class SweetBookProvider(BookProvider):
             raise ProviderError(
                 code=ErrorCode.ERR002,
                 message=f"Unexpected photo upload response for book '{book_uid}': {exc}",
+            ) from exc
+
+    async def finalize_book(self, book_uid: str) -> FinalizationData:
+        """Transition a DRAFT book to FINALIZED status.
+
+        POST /v1/books/{bookUid}/finalization — no request body needed.
+        Returns 201 on first finalization, 200 if already finalized (idempotent).
+        """
+        raw = await self._post(f"/books/{book_uid}/finalization", {})
+        try:
+            return FinalizationResponse.model_validate(raw).data
+        except ValidationError as exc:
+            raise ProviderError(
+                code=ErrorCode.ERR002,
+                message=f"Unexpected finalization response for book '{book_uid}': {exc}",
             ) from exc
 
     async def list_photos(self, book_uid: str) -> PhotoListData:

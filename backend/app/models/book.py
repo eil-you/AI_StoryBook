@@ -17,6 +17,7 @@ class BookStatus(str, enum.Enum):
     draft = "draft"
     processing = "processing"
     completed = "completed"
+    finalized = "finalized"
 
 
 class Book(Base):
@@ -26,6 +27,7 @@ class Book(Base):
     user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     content_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    cover_image_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     status: Mapped[BookStatus] = mapped_column(
         Enum(BookStatus), default=BookStatus.draft, nullable=False
     )
