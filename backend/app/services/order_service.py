@@ -133,12 +133,12 @@ async def get_order(*, order_uid: str) -> OrderDto:
         await provider.close()
 
 
-async def cancel_order(*, order_uid: str) -> OrderDto:
+async def cancel_order(*, order_uid: str, cancel_reason: str) -> OrderDto:
     """Cancel a PAID or PDF_READY order."""
     settings = get_settings()
     provider = SweetBookProvider(api_key=settings.SWEETBOOK_API_KEY)
     try:
-        return await provider.cancel_order(order_uid)
+        return await provider.cancel_order(order_uid, cancel_reason=cancel_reason)
     except ProviderError as exc:
         raise OrderServiceError(f"Failed to cancel order '{order_uid}': {exc.message}") from exc
     finally:

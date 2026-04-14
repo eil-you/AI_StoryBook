@@ -502,9 +502,9 @@ class SweetBookProvider(BookProvider):
                 message=f"Unexpected order detail response for '{order_uid}': {exc}",
             ) from exc
 
-    async def cancel_order(self, order_uid: str) -> OrderDto:
+    async def cancel_order(self, order_uid: str, *, cancel_reason: str) -> OrderDto:
         """Cancel a PAID or PDF_READY order."""
-        raw = await self._post(f"/orders/{order_uid}/cancel", {})
+        raw = await self._post(f"/orders/{order_uid}/cancel", {"cancelReason": cancel_reason})
         try:
             return OrderDetailResponse.model_validate(raw).data
         except ValidationError as exc:

@@ -199,13 +199,18 @@ class CancelOrderResponse(BaseModel):
     message: str
     order_uid: str
     status: int
+    cancel_reason: str | None
+
+
+class CancelOrderRequest(BaseModel):
+    cancel_reason: str = Field(..., description="취소 사유")
 
 
 @router.post("/{order_uid}/cancel", response_model=CancelOrderResponse)
-async def cancel(order_uid: str) -> CancelOrderResponse:
+async def cancel(order_uid: str, body: CancelOrderRequest) -> CancelOrderResponse:
     """PAID 또는 PDF_READY 상태의 주문을 취소합니다."""
     try:
-        data = await cancel_order(order_uid=order_uid)
+        data = await cancel_order(order_uid=order_uid, cancel_reason=body.cancel_reason)
     except OrderServiceError as exc:
         raise HTTPException(status_code=502, detail=str(exc))
 
@@ -214,6 +219,7 @@ async def cancel(order_uid: str) -> CancelOrderResponse:
         message="주문이 취소되었습니다.",
         order_uid=data.orderUid,
         status=data.status,
+        cancel_reason=data.cancelReason,
     )
 
 

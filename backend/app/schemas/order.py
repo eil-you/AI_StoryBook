@@ -9,6 +9,7 @@ from __future__ import annotations
 from decimal import Decimal
 
 from pydantic import BaseModel, Field
+from typing import Optional, List, Any
 
 
 # ---------------------------------------------------------------------------
@@ -57,13 +58,14 @@ class ShippingDto(BaseModel):
 
 class OrderDto(BaseModel):
     orderUid: str
-    status: int                       # 20 = PAID
+    status: Optional[int] = 0                       # 20 = PAID
     paidCreditAmount: Decimal
-    shippingAmount: Decimal
-    packagingAmount: Decimal
+    shippingAmount: Optional[int] = 0
+    packagingAmount: Optional[int] = 0
     items: list[OrderItemDto]
-    shipping: ShippingDto
+    shipping: Optional[dict] = None
     externalRef: str | None = None
+    cancelReason: str | None = None
 
 
 class CreateOrderResponse(BaseModel):
@@ -109,9 +111,9 @@ class CreateEstimatePayload(BaseModel):
 
 
 class EstimateDto(BaseModel):
-    totalAmount: Decimal
-    shippingAmount: Decimal
-    packagingAmount: Decimal
+    totalAmount: Optional[int] = 0
+    shippingAmount: Optional[int] = 2500
+    packagingAmount: Optional[int] = 0
 
 
 class EstimateResponse(BaseModel):
