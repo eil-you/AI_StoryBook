@@ -5,6 +5,7 @@ from openai import APIStatusError, APITimeoutError, AsyncOpenAI, RateLimitError
 from pydantic import BaseModel
 
 from app.core.config import get_settings
+from app.services.image_storage import download_and_save
 
 logger = logging.getLogger(__name__)
 
@@ -184,4 +185,5 @@ class AIService:
             logger.error("Image generation API error (status=%s): %s", e.status_code, e)
             raise StoryGenerationError(f"Image generation failed: {e.message}") from e
 
-        return response.data[0].url
+        dalle_url = response.data[0].url
+        return await download_and_save(dalle_url)
