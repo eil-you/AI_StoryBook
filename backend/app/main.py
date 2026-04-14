@@ -5,12 +5,13 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import book_specs, books, contents, covers, images, stories, templates
 from app.core.config import get_settings
+from app.core.database import init_db
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Validate that all required env vars are present at startup.
     get_settings()
+    await init_db()
     yield
 
 
