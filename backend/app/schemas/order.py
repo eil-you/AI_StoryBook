@@ -62,7 +62,7 @@ class OrderDto(BaseModel):
     paidCreditAmount: Decimal
     shippingAmount: Optional[int] = 0
     packagingAmount: Optional[int] = 0
-    items: list[OrderItemDto]
+    items: list[OrderItemDto] = Field(default_factory=list)
     shipping: Optional[dict] = None
     externalRef: str | None = None
     cancelReason: str | None = None
