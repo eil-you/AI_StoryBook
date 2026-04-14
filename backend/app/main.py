@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import book_specs, books, contents, covers, images, orders, stories, templates
+from app.api import auth, book_specs, books, contents, covers, images, orders, stories, templates
 from app.core.config import get_settings
 from app.core.database import init_db
 
@@ -36,6 +36,7 @@ app.add_middleware(
 )
 
 
+app.include_router(auth.router)
 app.include_router(book_specs.router)
 app.include_router(books.router)
 app.include_router(images.router)

@@ -5,6 +5,8 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.dependencies import get_current_user
+from app.models.user import User
 from app.services.order_service import (
     OrderServiceError,
     cancel_order,
@@ -39,6 +41,7 @@ class EstimateResponse(BaseModel):
 async def estimate(
     body: EstimateRequest,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> EstimateResponse:
     """주문 전 예상 금액을 조회합니다."""
     try:
@@ -87,6 +90,7 @@ class CreateOrderResponse(BaseModel):
 async def place_order(
     body: CreateOrderRequest,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> CreateOrderResponse:
     """FINALIZED 책으로 주문을 생성합니다. 크레딧이 즉시 차감됩니다."""
     try:
@@ -136,6 +140,7 @@ async def get_orders(
     status: int | None = None,
     limit: int = 20,
     offset: int = 0,
+    current_user: User = Depends(get_current_user),
 ) -> ListOrdersResponse:
     """SweetBook 주문 목록을 조회합니다."""
     try:
@@ -172,7 +177,10 @@ class OrderDetailResponse(BaseModel):
 
 
 @router.get("/{order_uid}", response_model=OrderDetailResponse)
-async def get_order_detail(order_uid: str) -> OrderDetailResponse:
+async def get_order_detail(
+    order_uid: str,
+    current_user: User = Depends(get_current_user),
+) -> OrderDetailResponse:
     """특정 주문의 상세 정보를 조회합니다."""
     try:
         data = await get_order(order_uid=order_uid)
@@ -207,7 +215,11 @@ class CancelOrderRequest(BaseModel):
 
 
 @router.post("/{order_uid}/cancel", response_model=CancelOrderResponse)
-async def cancel(order_uid: str, body: CancelOrderRequest) -> CancelOrderResponse:
+async def cancel(
+    order_uid: str,
+    body: CancelOrderRequest,
+    current_user: User = Depends(get_current_user),
+) -> CancelOrderResponse:
     """PAID 또는 PDF_READY 상태의 주문을 취소합니다."""
     try:
         data = await cancel_order(order_uid=order_uid, cancel_reason=body.cancel_reason)
@@ -247,6 +259,7 @@ class UpdateShippingResponse(BaseModel):
 async def update_order_shipping(
     order_uid: str,
     body: UpdateShippingRequest,
+    current_user: User = Depends(get_current_user),
 ) -> UpdateShippingResponse:
     """주문의 배송지를 수정합니다."""
     try:

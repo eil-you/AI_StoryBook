@@ -3,8 +3,9 @@ from typing import NoReturn
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, UploadFile
 
-from app.core.dependencies import get_book_provider
+from app.core.dependencies import get_book_provider, get_current_user
 from app.core.exceptions import ErrorCode, ProviderError
+from app.models.user import User
 from app.providers.base import BookProvider
 from app.schemas.cover import CoverResponse
 
@@ -17,6 +18,7 @@ async def add_cover(
     request: Request,
     idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
     provider: BookProvider = Depends(get_book_provider),
+    current_user: User = Depends(get_current_user),
 ) -> CoverResponse:
     """
     Add a cover to a DRAFT book by binding a cover template with images and text.
