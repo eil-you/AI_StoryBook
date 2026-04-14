@@ -3,8 +3,9 @@ from typing import NoReturn
 
 from fastapi import APIRouter, Depends, Form, Header, HTTPException, Query, Request, UploadFile
 
-from app.core.dependencies import get_book_provider
+from app.core.dependencies import get_book_provider, get_current_user
 from app.core.exceptions import ErrorCode, ProviderError
+from app.models.user import User
 from app.providers.base import BookProvider
 from app.schemas.content import BreakBefore, ContentResponse
 
@@ -21,6 +22,7 @@ async def add_content(
     break_before: BreakBefore | None = Query(None),
     idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
     provider: BookProvider = Depends(get_book_provider),
+    current_user: User = Depends(get_current_user),
 ) -> ContentResponse:
     """
     Append an interior page to a DRAFT book by binding a content template.

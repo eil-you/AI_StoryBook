@@ -2,8 +2,9 @@ from typing import NoReturn
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 
-from app.core.dependencies import get_book_provider
+from app.core.dependencies import get_book_provider, get_current_user
 from app.core.exceptions import ErrorCode, ProviderError
+from app.models.user import User
 from app.providers.base import BookProvider
 from app.schemas.book import (
     BookListResponse,
@@ -20,6 +21,7 @@ async def create_book(
     body: CreateBookBody,
     idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
     provider: BookProvider = Depends(get_book_provider),
+    current_user: User = Depends(get_current_user),
 ) -> CreateBookResponse:
     """Create a new book in DRAFT status."""
     try:
@@ -42,6 +44,7 @@ async def list_books(
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
     provider: BookProvider = Depends(get_book_provider),
+    current_user: User = Depends(get_current_user),
 ) -> BookListResponse:
     """Return a paginated list of books, or a single book when book_uid is provided."""
     try:

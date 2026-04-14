@@ -2,8 +2,9 @@ from typing import NoReturn
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
-from app.core.dependencies import get_book_provider
+from app.core.dependencies import get_book_provider, get_current_user
 from app.core.exceptions import ErrorCode, ProviderError
+from app.models.user import User
 from app.providers.base import BookProvider
 from app.schemas.image import PhotoListResponse, UploadPhotoResponse
 
@@ -26,6 +27,7 @@ async def upload_photo(
     book_uid: str,
     file: UploadFile = File(...),
     provider: BookProvider = Depends(get_book_provider),
+    current_user: User = Depends(get_current_user),
 ) -> UploadPhotoResponse:
     """
     Upload a single photo to a DRAFT book (max 50 MB, up to 200 photos per book).
@@ -66,6 +68,7 @@ async def upload_photo(
 async def list_photos(
     book_uid: str,
     provider: BookProvider = Depends(get_book_provider),
+    current_user: User = Depends(get_current_user),
 ) -> PhotoListResponse:
     """Return all photos uploaded to a book."""
     try:

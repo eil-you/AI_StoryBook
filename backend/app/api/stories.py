@@ -3,8 +3,10 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.dependencies import get_current_user
 from app.models.book import Book, BookStatus
 from app.models.page import Page
+from app.models.user import User
 from app.services.ai_service import AIService, PageData, StoryData, StoryGenerationError
 from app.services.sweetbook_service import (
     SweetBookPublishError,
@@ -39,6 +41,7 @@ class GenerateStoryResponse(BaseModel):
 async def generate_story(
     body: GenerateStoryRequest,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> GenerateStoryResponse:
     """주인공 정보와 장르, 배경, 교육 가치를 바탕으로 어린이 동화를 자동 생성하고 저장합니다."""
     try:
@@ -53,7 +56,7 @@ async def generate_story(
         raise HTTPException(status_code=502, detail=str(exc))
 
     book = Book(
-        user_id=1,  # TODO: replace with authenticated user id
+        user_id=current_user.id,
         title=story.title,
         content_summary=f"주인공: {body.character_name}({body.character_age}세) / 장르: {body.genre} / 배경: {body.background} / 교육: {body.education}",
         cover_image_url=story.cover_image_url,
@@ -100,6 +103,7 @@ async def publish_cover(
     book_id: int,
     body: PublishCoverRequest,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> PublishCoverResponse:
     """DB에 저장된 스토리의 표지 이미지를 SweetBook DRAFT 책에 추가합니다."""
     try:
@@ -138,6 +142,7 @@ async def publish_contents(
     book_id: int,
     body: PublishContentsRequest,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> PublishContentsResponse:
     """DB에 저장된 스토리 페이지(텍스트 + 이미지)를 SweetBook DRAFT 책에 내지로 추가합니다."""
     try:
@@ -170,6 +175,7 @@ class FinalizeStoryResponse(BaseModel):
 async def finalize_story(
     book_id: int,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> FinalizeStoryResponse:
     """SweetBook DRAFT 책을 FINALIZED 상태로 전환합니다. 주문 생성이 가능해집니다."""
     try:
