@@ -1,158 +1,189 @@
-import logging
-
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy.orm import Session, joinedload
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.models.book import Book
-from app.models.enums import ErrorCode
-from app.schemas.story import BookCreatedResponse, PageOut, StoryDetail, StorySummary, StoryRequest
-from app.services.ai_service import StoryGenerationError
-from app.services.story_service import StoryService
-
-logger = logging.getLogger(__name__)
-
-router = APIRouter(prefix="/stories", tags=["Stories"])
-
-
-@router.post(
-    "/generate",
-    response_model=BookCreatedResponse,
-    status_code=status.HTTP_201_CREATED,
-    summary="Generate and save an AI story",
-    description=(
-        "Generates a children's story from the given prompt, "
-        "saves it to the Book and Page tables, and returns the book ID with content."
-    ),
+from app.models.book import Book, BookStatus
+from app.models.page import Page
+from app.services.ai_service import AIService, PageData, StoryData, StoryGenerationError
+from app.services.sweetbook_service import (
+    SweetBookPublishError,
+    create_sweetbook_book,
+    finalize_sweetbook_book,
+    publish_contents_to_sweetbook,
+    publish_cover_to_sweetbook,
 )
+
+router = APIRouter(prefix="/api/v1/stories", tags=["Stories"])
+
+_ai_service = AIService()
+
+
+class GenerateStoryRequest(BaseModel):
+    character_name: str = Field(..., min_length=1, max_length=50, description="주인공 이름")
+    character_age: int = Field(..., ge=1, le=20, description="주인공 나이")
+    genre: str = Field(..., min_length=1, max_length=50, description="장르 (예: 모험, 판타지, 일상)")
+    background: str = Field(..., min_length=1, max_length=100, description="배경/장소 (예: 숲속, 우주, 바닷속)")
+    education: str = Field(..., min_length=1, max_length=100, description="교육적 가치 (예: 용기, 친절, 우정)")
+    book_spec_uid: str = Field(..., description="SweetBook 사양 UID")
+
+
+class GenerateStoryResponse(BaseModel):
+    success: bool
+    message: str
+    book_id: int
+    data: StoryData
+
+
+@router.post("/generate", response_model=GenerateStoryResponse, status_code=201)
 async def generate_story(
-    request: StoryRequest, db: Session = Depends(get_db)
-) -> BookCreatedResponse:
-    """Generate a story via OpenAI, persist it, and return the saved book.
-
-    Transaction ownership: ``with db.begin()`` commits on success and
-    auto-rolls back on any exception, keeping the service layer free of
-    transaction concerns.
-    """
-    story_service = StoryService(db)
+    body: GenerateStoryRequest,
+    db: AsyncSession = Depends(get_db),
+) -> GenerateStoryResponse:
+    """주인공 정보와 장르, 배경, 교육 가치를 바탕으로 어린이 동화를 자동 생성하고 저장합니다."""
     try:
-        with db.begin():
-            book = await story_service.create_story(
-                user_id=request.user_id,
-                prompt_text=request.prompt_text,
-            )
-            # Access relationship inside the transaction so expire_on_commit
-            # does not trigger a lazy-load after the session is committed.
-            pages = sorted(book.pages, key=lambda p: p.page_number)
-    except StoryGenerationError as e:
-        logger.warning("Story generation failed: %s", e)
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=ErrorCode.AI_SERVICE_UNAVAILABLE.to_detail(str(e)),
+        story = await _ai_service.generate_story(
+            character_name=body.character_name,
+            character_age=body.character_age,
+            genre=body.genre,
+            background=body.background,
+            education=body.education,
         )
+    except StoryGenerationError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
 
-    return BookCreatedResponse(
-        book_id=book.id,
-        title=book.title,
-        status=book.status,
-        created_at=book.created_at,
-        updated_at=book.updated_at,
-        pages=[
-            PageOut(
-                page_number=p.page_number,
-                text_content=p.text_content or "",
-                created_at=p.created_at,
-                updated_at=p.updated_at,
-            )
-            for p in pages
-        ],
+    book = Book(
+        user_id=1,  # TODO: replace with authenticated user id
+        title=story.title,
+        content_summary=f"주인공: {body.character_name}({body.character_age}세) / 장르: {body.genre} / 배경: {body.background} / 교육: {body.education}",
+        cover_image_url=story.cover_image_url,
+        status=BookStatus.draft,
     )
+    db.add(book)
+    await db.flush()  # book.id 확보
 
+    for idx, page in enumerate(story.pages, start=1):
+        db.add(Page(
+            book_id=book.id,
+            page_number=idx,
+            text_content=page.text,
+            image_url=page.image_url,
+        ))
 
-@router.get(
-    "",
-    response_model=list[StorySummary],
-    summary="List all stories",
-    description="Returns a lightweight list of all stories (id, title, created_at).",
-)
-async def list_stories(db: Session = Depends(get_db)) -> list[StorySummary]:
-    """Return id, title, and created_at for every book in the database."""
-    books = db.query(Book).filter(Book.is_deleted.is_(False)).order_by(Book.created_at.desc()).all()
-    return [StorySummary.model_validate(b) for b in books]
+    await db.commit()
+    await db.refresh(book)
 
-
-@router.get(
-    "/search",
-    response_model=list[StorySummary],
-    summary="Search stories by title",
-    description="Returns stories whose title contains the given keyword (case-insensitive LIKE search).",
-)
-async def search_stories(
-    q: str = Query(..., min_length=1, description="Title keyword to search for"),
-    db: Session = Depends(get_db),
-) -> list[StorySummary]:
-    """Search active books by title using a SQL LIKE pattern."""
-    books = (
-        db.query(Book)
-        .filter(Book.is_deleted.is_(False), Book.title.ilike(f"%{q}%"))
-        .order_by(Book.created_at.desc())
-        .all()
-    )
-    return [StorySummary.model_validate(b) for b in books]
-
-
-@router.get(
-    "/{book_id}",
-    response_model=StoryDetail,
-    summary="Get full story detail",
-    description="Returns the full detail of a story, including all its pages, fetched in one query via joinedload.",
-)
-async def get_story(book_id: int, db: Session = Depends(get_db)) -> StoryDetail:
-    """Fetch a single book with all its pages eagerly loaded."""
-    book = (
-        db.query(Book)
-        .options(joinedload(Book.pages))
-        .filter(Book.id == book_id, Book.is_deleted.is_(False))
-        .first()
-    )
-    if book is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=ErrorCode.STORY_NOT_FOUND.to_detail(),
+    try:
+        await create_sweetbook_book(
+            book_id=book.id,
+            book_spec_uid=body.book_spec_uid,
+            db=db,
         )
-    pages = sorted(book.pages, key=lambda p: p.page_number)
-    return StoryDetail(
-        id=book.id,
-        title=book.title,
-        status=book.status,
-        content_summary=book.content_summary,
-        created_at=book.created_at,
-        updated_at=book.updated_at,
-        pages=[
-            PageOut(
-                page_number=p.page_number,
-                text_content=p.text_content or "",
-                created_at=p.created_at,
-                updated_at=p.updated_at,
-            )
-            for p in pages
-        ],
+    except SweetBookPublishError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+    return GenerateStoryResponse(success=True, message="스토리 생성 완료", book_id=book.id, data=story)
+
+
+class PublishCoverRequest(BaseModel):
+    cover_template_uid: str = Field(..., description="표지 템플릿 UID")
+
+
+class PublishCoverResponse(BaseModel):
+    success: bool
+    message: str
+    book_id: int
+
+
+@router.post("/{book_id}/publish/cover", response_model=PublishCoverResponse, status_code=201)
+async def publish_cover(
+    book_id: int,
+    body: PublishCoverRequest,
+    db: AsyncSession = Depends(get_db),
+) -> PublishCoverResponse:
+    """DB에 저장된 스토리의 표지 이미지를 SweetBook DRAFT 책에 추가합니다."""
+    try:
+        await publish_cover_to_sweetbook(
+            book_id=book_id,
+            cover_template_uid=body.cover_template_uid,
+            db=db,
+        )
+    except SweetBookPublishError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+    return PublishCoverResponse(
+        success=True,
+        message="SweetBook 표지 퍼블리시 완료",
+        book_id=book_id,
     )
 
 
-@router.delete(
-    "/{book_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
-    summary="Soft-delete a story",
-    description="Marks the story as deleted by setting is_deleted=True. The record is retained in the database.",
-)
-async def delete_story(book_id: int, db: Session = Depends(get_db)) -> None:
-    """Soft-delete a book by flipping its is_deleted flag."""
-    book = db.query(Book).filter(Book.id == book_id, Book.is_deleted.is_(False)).first()
-    if book is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=ErrorCode.STORY_NOT_FOUND.to_detail(),
+class PublishContentsRequest(BaseModel):
+    content_template_uid: str = Field(..., description="내지 콘텐츠 템플릿 UID")
+    extra_parameters: dict[str, str] = Field(
+        default_factory=dict,
+        description="템플릿 필수 파라미터 추가 입력 (예: {\"childName\": \"민준\"})",
+    )
+
+
+class PublishContentsResponse(BaseModel):
+    success: bool
+    message: str
+    book_id: int
+    page_count: int
+
+
+@router.post("/{book_id}/publish/contents", response_model=PublishContentsResponse, status_code=201)
+async def publish_contents(
+    book_id: int,
+    body: PublishContentsRequest,
+    db: AsyncSession = Depends(get_db),
+) -> PublishContentsResponse:
+    """DB에 저장된 스토리 페이지(텍스트 + 이미지)를 SweetBook DRAFT 책에 내지로 추가합니다."""
+    try:
+        pages = await publish_contents_to_sweetbook(
+            book_id=book_id,
+            content_template_uid=body.content_template_uid,
+            extra_parameters=body.extra_parameters,
+            db=db,
         )
-    book.is_deleted = True
-    db.commit()
+    except SweetBookPublishError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+    return PublishContentsResponse(
+        success=True,
+        message="SweetBook 내지 퍼블리시 완료",
+        book_id=book_id,
+        page_count=len(pages),
+    )
+
+
+class FinalizeStoryResponse(BaseModel):
+    success: bool
+    message: str
+    book_id: int
+    page_count: int
+    finalized_at: str
+
+
+@router.post("/{book_id}/finalize", response_model=FinalizeStoryResponse, status_code=201)
+async def finalize_story(
+    book_id: int,
+    db: AsyncSession = Depends(get_db),
+) -> FinalizeStoryResponse:
+    """SweetBook DRAFT 책을 FINALIZED 상태로 전환합니다. 주문 생성이 가능해집니다."""
+    try:
+        data = await finalize_sweetbook_book(
+            book_id=book_id,
+            db=db,
+        )
+    except SweetBookPublishError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+    return FinalizeStoryResponse(
+        success=True,
+        message="SweetBook 파이널라이즈 완료",
+        book_id=book_id,
+        page_count=data.pageCount,
+        finalized_at=data.finalizedAt.isoformat(),
+    )

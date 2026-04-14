@@ -1,17 +1,23 @@
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from functools import lru_cache
+
+from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8",
-        case_sensitive=False,
-    )
+    OPENAI_API_KEY: str
+    SWEETBOOK_API_KEY: str
+    OPENAI_MODEL: str = "gpt-4o-mini"
+    OPENAI_IMAGE_MODEL: str = "dall-e-3"
+    DATABASE_URL: str = "sqlite:///./storybook.db"
 
-    openai_api_key: str
-    sweetbook_api_key: str
-    openai_model: str = "gpt-4o-mini"
-    database_url: str = "sqlite:///./storybook.db"
+    AWS_ACCESS_KEY_ID: str
+    AWS_SECRET_ACCESS_KEY: str
+    AWS_REGION: str = "ap-northeast-2"
+    AWS_S3_BUCKET: str
+
+    model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
 
-settings = Settings()
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()

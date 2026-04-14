@@ -1,16 +1,23 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.stories import router as stories_router
-from app.core.database import engine
-from app.models import base  # noqa: F401 – registers all models with metadata
-from app.models.book import Book  # noqa: F401
-from app.models.order import Order  # noqa: F401
-from app.models.page import Page  # noqa: F401
-from app.models.user import User  # noqa: F401
+from app.api import book_specs, books, contents, covers, images, orders, stories, templates
+from app.core.config import get_settings
+from app.core.database import init_db
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    get_settings()
+    await init_db()
+    yield
+
 
 app = FastAPI(
-    title="AI-StoryWeaver API",
+    lifespan=lifespan,
+    title="AI-test API",
     description="Backend API for the AI-StoryWeaver application",
     version="0.1.0",
 )
@@ -29,15 +36,17 @@ app.add_middleware(
 )
 
 
-base.Base.metadata.create_all(bind=engine)
-
-app.include_router(stories_router, prefix="/api/v1")
+app.include_router(book_specs.router)
+app.include_router(books.router)
+app.include_router(images.router)
+app.include_router(covers.router)
+app.include_router(contents.router)
+app.include_router(templates.router)
+app.include_router(stories.router)
+app.include_router(orders.router)
 
 
 @app.get("/health", tags=["Health"])
 async def health_check() -> dict[str, str]:
     """Returns the current health status of the API."""
     return {"status": "ok"}
-
-if __name__ == "__main__":
-    uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=True)

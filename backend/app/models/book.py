@@ -16,9 +16,11 @@ class Book(TimestampMixin, Base):
     __tablename__ = "books"
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     content_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    cover_image_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    sweetbook_book_uid: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     status: Mapped[BookStatus] = mapped_column(
         Enum(BookStatus), default=BookStatus.draft, nullable=False
     )
