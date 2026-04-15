@@ -37,27 +37,39 @@ _DUMMY_PAGES: list[str] = [
 ]
 
 
-def build_dummy_story(
-    character_name: str,
-    test_image_url_fn,  # Callable[[], str]
-) -> dict:
+def build_dummy_story(character_name: str) -> dict:
     """더미 StoryData dict를 반환합니다.
 
     character_name 을 제목과 첫 페이지에 삽입해 실제 생성처럼 보이게 합니다.
-    test_image_url_fn 은 image_storage._get_test_image_url 을 주입받아 사용합니다.
+    각 페이지에 고유한 이미지를 할당합니다 (SweetBook이 중복 이미지를 update로 처리하는 문제 방지).
     """
+    from pathlib import Path
+    from app.services.image_storage import _TEST_IMAGES_DIR
+
+    # 사용 가능한 이미지를 섞어서 순서대로 할당 — 이미지 수가 부족하면 순환
+    images = sorted(
+        _TEST_IMAGES_DIR.glob("*.png"),
+        key=lambda p: p.name,
+    )
+    if not images:
+        _url = lambda: "https://placehold.co/1024x1024/FFF9C4/A0522D?text=No+Image"
+    else:
+        import itertools
+        _cycle = itertools.cycle(f"/static/images/{p.name}" for p in images)
+        _url = lambda: next(_cycle)  # noqa: E731
+
     title = _DUMMY_TITLE.replace("모모", character_name)
     pages = []
     for text in _DUMMY_PAGES:
         pages.append(
             {
                 "text": text.replace("모모", character_name),
-                "image_url": test_image_url_fn(),
+                "image_url": _url(),
             }
         )
 
     return {
         "title": title,
-        "cover_image_url": test_image_url_fn(),
+        "cover_image_url": _url(),
         "pages": pages,
     }

@@ -8,7 +8,24 @@
       "Bash(.venv/Scripts/python -m pytest tests/ -v)",
       "Read(//c/Users/yubin/.claude/**)",
       "Read(//c/Users/yubin/**)",
-      "Read(//c/Users/yubin/OneDrive/**)"
+      "Read(//c/Users/yubin/OneDrive/**)",
+      "Bash(npm install:*)",
+      "Bash(npm run:*)",
+      "Bash(python -c \"from app.services.ai_service import AIService; print\\('OK'\\)\")",
+      "Bash(python -c \"from app.main import app; print\\('OK'\\)\")",
+      "Bash(python -c \"from app.services.image_storage import download_and_save; from app.core.config import get_settings; s=get_settings\\(\\); print\\('IMAGE_TEST_MODE:', s.IMAGE_TEST_MODE\\)\")",
+      "Bash(netstat -ano)",
+      "Bash(findstr :8000)",
+      "Bash(cmd:*)",
+      "Bash(.venv/Scripts/python.exe -c \"from PIL import Image; print\\('ok'\\)\")",
+      "Bash(.venv/Scripts/pip.exe install *)",
+      "Bash(python -c \"from app.services.sweetbook_service import create_sweetbook_book; from app.api.templates import get_template; print\\('import OK'\\)\")",
+      "Bash(python -m uvicorn app.main:app --reload)",
+      "Bash(python -c \"from app.providers.sweetbook import SweetBookProvider\")",
+      "Bash(python -c \"from app.services.dummy_story import _DUMMY_PAGES; print\\('page count:', len\\(_DUMMY_PAGES\\)\\)\")"
     ]
-  }
+  },
+  "enabledMcpjsonServers": [
+    "appModernizationDeploy"
+  ]
 }
