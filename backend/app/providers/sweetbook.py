@@ -411,8 +411,10 @@ class SweetBookProvider(BookProvider):
         if idempotency_key is not None:
             extra_headers["Idempotency-Key"] = idempotency_key
 
+        # /contents 엔드포인트는 항상 multipart/form-data를 요구함.
+        # httpx는 files 파라미터에 실제 파일이 있어야만 multipart를 사용하므로,
+        # 파일이 없는 경우(filler 등)에는 multipart body를 직접 조립해서 전송함.
         if upload_files:
-            # 파일이 있을 때만 multipart/form-data 사용
             raw = await self._post_multipart(
                 f"/books/{book_uid}/contents",
                 data=form_data,
@@ -421,18 +423,11 @@ class SweetBookProvider(BookProvider):
                 extra_headers=extra_headers or None,
             )
         else:
-            # 파일이 없는 경우(filler 등) JSON POST 사용 — multipart 시 415 오류 방지
-            json_body: dict = {"templateUid": template_uid}
-            if parameters is not None:
-                json_body["parameters"] = parameters
-            if from_ is not None:
-                json_body["from"] = from_
-            raw = await self._request(
-                "POST",
+            raw = await self._post_multipart_fields_only(
                 f"/books/{book_uid}/contents",
-                json=json_body,
-                params=query_params or {},
-                headers=extra_headers or {},
+                data=form_data,
+                params=query_params or None,
+                extra_headers=extra_headers or None,
             )
         try:
             return ContentResponse.model_validate(raw).data
@@ -653,6 +648,38 @@ class SweetBookProvider(BookProvider):
 
     async def _post(self, path: str, body: dict, extra_headers: dict | None = None) -> dict:
         return await self._request("POST", path, json=body, headers=extra_headers or {})
+
+    async def _post_multipart_fields_only(
+        self,
+        path: str,
+        data: dict[str, str],
+        params: dict[str, str] | None = None,
+        extra_headers: dict[str, str] | None = None,
+    ) -> dict:
+        """파일 없이 multipart/form-data로 POST 전송.
+
+        httpx는 files 파라미터에 실제 파일이 있어야 multipart를 사용하므로,
+        데이터 필드만 있는 경우 multipart body를 직접 조립해서 전송한다.
+        """
+        import secrets
+        boundary = secrets.token_hex(16)
+        body_parts: list[bytes] = []
+        for key, value in data.items():
+            body_parts.append(
+                f"--{boundary}\r\n"
+                f'Content-Disposition: form-data; name="{key}"\r\n'
+                f"\r\n"
+                f"{value}\r\n"
+            )
+        raw_body = "".join(body_parts) + f"--{boundary}--\r\n"
+        headers = {**(extra_headers or {}), "Content-Type": f"multipart/form-data; boundary={boundary}"}
+        return await self._request(
+            "POST",
+            path,
+            content=raw_body.encode(),
+            headers=headers,
+            params=params or {},
+        )
 
     async def _post_multipart(
         self,
