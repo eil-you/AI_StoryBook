@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     AWS_S3_BUCKET: str = ""
 
     IMAGE_TEST_MODE: bool = True
+    STORY_TEST_MODE: bool = True  # True면 OpenAI 없이 더미 스토리 반환
 
     SECRET_KEY: str
     JWT_ALGORITHM: str = "HS256"

@@ -502,8 +502,18 @@ async def finalize_sweetbook_book(
     page_result = await db.execute(select(Page).where(Page.book_id == book_id))
     local_page_count = len(page_result.scalars().all())
 
-    # publish 단계에서 홀수면 filler 1장이 추가됐으므로 짝수로 올림
+    # 홀수면 filler 1장이 추가됐으므로 짝수로 올림
     effective_page_count = local_page_count + (1 if local_page_count % 2 != 0 else 0)
+
+    # 페이지가 최소치(24)에 미달하면 짝수 단위로 올려서 24에 맞춤
+    # (더미 모드나 AI 파싱 오류로 22페이지 이하가 저장된 경우 방어)
+    if effective_page_count < _PAGE_MIN:
+        logger.warning(
+            "book_id=%d: page count %d < minimum %d — padding to %d for finalization",
+            book_id, effective_page_count, _PAGE_MIN, _PAGE_MIN,
+        )
+        effective_page_count = _PAGE_MIN
+
     _validate_page_count(effective_page_count)
 
     provider = SweetBookProvider(api_key=settings.SWEETBOOK_API_KEY)

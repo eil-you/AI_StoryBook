@@ -90,9 +90,23 @@ class AIService:
     ) -> StoryData:
         """캐릭터 정보로 어린이 동화와 각 페이지 이미지를 생성합니다.
 
+        STORY_TEST_MODE=True 이면 OpenAI를 호출하지 않고 더미 스토리를 반환합니다.
+
         Raises:
             StoryGenerationError: AI 호출 또는 응답 파싱 실패 시.
         """
+        if get_settings().STORY_TEST_MODE:
+            logger.info("STORY_TEST_MODE enabled — returning dummy story for %r", character_name)
+            from app.services.dummy_story import build_dummy_story
+            from app.services.image_storage import _get_test_image_url
+
+            raw = build_dummy_story(character_name, _get_test_image_url)
+            return StoryData(
+                title=raw["title"],
+                cover_image_url=raw["cover_image_url"],
+                pages=[PageData(**p) for p in raw["pages"]],
+            )
+
         prompt = self._build_prompt(character_name, character_age, genre, background, education)
 
         title, page_texts = None, None
