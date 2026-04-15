@@ -12,40 +12,73 @@
 &nbsp;&nbsp;
 <h2>💻 실행 방법</h2>
 
-``` python
-  # 설치 및 환경 설정
-  # 환경 변수 설정(.env)
-  # 실행
-```
-``` python
-  # 설치 및 환경 설정
-  # 환경 변수 설정(.env)
-  # 실행
-```
+> **사전 요구사항**: Python 3.12+, Node.js 18+
 
-``` python
-  # 설치 및 환경 설정
-  # 환경 변수 설정(.env)
-  # 실행
+**① 백엔드**
+```bash
+cd backend
+
+# 가상환경 생성 및 활성화
+python -m venv .venv
+source .venv/bin/activate          # Mac/Linux
+# .\.venv\Scripts\Activate.ps1    # Windows PowerShell
+
+# 패키지 설치
+pip install -r requirements.txt
+
+# 환경 변수 설정
+cp .env.example .env
+# .env 를 열어 아래 두 항목만 채우면 전체 플로우 실행 가능
+#   OPENAI_API_KEY=sk-...   ← STORY_TEST_MODE=true 이면 없어도 됨
+#   SECRET_KEY=임의문자열
+
+# 서버 실행
+uvicorn app.main:app --reload --port 8000
 ```
+- API 서버: http://localhost:8000
+- Swagger UI: http://localhost:8000/docs
+
+> **Mock 모드 안내**  
+> `STORY_TEST_MODE=true`(기본값) 상태에서는 OpenAI · SweetBook · AWS 키 없이도  
+> 스토리 생성 → 미리보기 → 주문하기 전체 플로우가 동작합니다.  
+> SweetBook API 접근 불가 시 템플릿은 `app/assets/` 의 로컬 JSON 파일로 자동 대체되며,  
+> 주문 금액 및 주문 결과도 mock 값으로 반환됩니다.
+
+**② 프론트엔드**
+```bash
+cd frontend
+
+npm install
+npm run dev
+```
+- 브라우저: http://localhost:5173
    
 &nbsp;&nbsp;
 <h2> 📋 사용한 API 목록</h2>
 
-| Rank | THING-TO-RANK |
-|-----:|---------------|
-|     1|    javascript |
-|     2|    python     |
-|     3|          sql  |
+**SweetBook API** (`https://api-sandbox.sweetbook.com/v1`)
+
+| Method | Endpoint | 용도 |
+|---|---|---|
+| GET | `/templates/{templateUid}` | 템플릿 상세 조회 (프리뷰 레이아웃) |
+| POST | `/books` | DRAFT 책 생성 |
+| POST | `/books/{bookUid}/cover` | 표지 이미지 업로드 |
+| POST | `/books/{bookUid}/contents` | 내지 페이지 업로드 |
+| POST | `/books/{bookUid}/finalization` | 책 완성 처리 |
+| POST | `/orders/estimate` | 주문 금액 사전 조회 |
+| POST | `/orders` | 주문 생성 |
+| GET | `/orders` | 주문 목록 조회 |
+| GET | `/orders/{orderUid}` | 주문 상세 조회 |
+| POST | `/orders/{orderUid}/cancel` | 주문 취소 |
+| PATCH | `/orders/{orderUid}/shipping` | 배송지 수정 |
 
 &nbsp;&nbsp;
 <h2>🤖 AI 도구 사용 내역</h2>
 
 | AI 도구 | 활용 내용 |
-|-----:|---------------|
-|Claude Code|    백엔드 AP |
-|     2|    python     |
-|     3|          sql  |
+|---|---|
+| Claude Code | 백엔드 API 설계 및 구현, 코드 리뷰, 디버깅 |
+| ChatGPT | 아이디어 기획 및 요구사항 정리 |
 
 &nbsp;&nbsp;
 <h2>🔨 설계 의도</h2>

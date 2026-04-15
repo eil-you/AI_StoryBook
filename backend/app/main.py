@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from app.api import auth, book_specs, books, contents, covers, images, orders, preview, stories, templates
+from app.api import auth, books, contents, covers, images, orders, preview, stories, templates
 from app.core.config import get_settings
 from app.core.database import init_db
 
@@ -43,7 +43,6 @@ _static_dir.mkdir(exist_ok=True)
 app.mount("/static", StaticFiles(directory=_static_dir), name="static")
 
 app.include_router(auth.router)
-app.include_router(book_specs.router)
 app.include_router(books.router)
 app.include_router(images.router)
 app.include_router(covers.router)

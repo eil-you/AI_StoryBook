@@ -1,7 +1,9 @@
+import json
 import logging
-from typing import NoReturn
+from pathlib import Path
+from typing import Any, NoReturn
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException
 
 from app.core.dependencies import get_book_provider
 from app.core.exceptions import ErrorCode, ProviderError
@@ -12,16 +14,19 @@ from app.schemas.template import (
     ParametersDto,
     TemplateDetailDto,
     TemplateDetailResponse,
-    TemplateKind,
-    TemplateListData,
-    TemplateListResponse,
-    TemplateScope,
     ThumbnailsDto,
 )
 
 _log = logging.getLogger(__name__)
 
-_MOCK_TEMPLATE_DETAIL = TemplateDetailDto(
+# app/assets/ 디렉터리 내 로컬 템플릿 JSON 파일 매핑 (UID → 파일명)
+_ASSETS_DIR = Path(__file__).resolve().parents[1] / "assets"
+_LOCAL_TEMPLATES: dict[str, str] = {
+    "7jOxkBjj6VGe": "my_template_cover.json",
+    "8DGGFyjtOu0E": "my_template_contents.json",
+}
+
+_GENERIC_MOCK = TemplateDetailDto(
     parameters=ParametersDto(
         definitions={
             "image": ParameterDefinition(
@@ -42,40 +47,54 @@ _MOCK_TEMPLATE_DETAIL = TemplateDetailDto(
     thumbnails=ThumbnailsDto(layout=None),
 )
 
+
+def _load_local_template(template_uid: str) -> TemplateDetailDto | None:
+    """app/assets/ 에서 로컬 JSON 파일을 읽어 TemplateDetailDto 로 변환합니다.
+    파일이 없거나 알 수 없는 UID면 None 반환.
+    """
+    filename = _LOCAL_TEMPLATES.get(template_uid)
+    if not filename:
+        return None
+
+    path = _ASSETS_DIR / filename
+    if not path.exists():
+        _log.warning("Local template file not found: %s", path)
+        return None
+
+    raw: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
+
+    # parameters: SweetBook JSON은 list 형태 → definitions dict 로 변환
+    parameters: ParametersDto | None = None
+    raw_params = raw.get("parameters")
+    if isinstance(raw_params, list):
+        defs: dict[str, ParameterDefinition] = {}
+        for item in raw_params:
+            name = item.get("name", "")
+            binding_val = item.get("binding", "text")
+            try:
+                binding = BindingKind(binding_val)
+            except ValueError:
+                binding = BindingKind.text
+            defs[name] = ParameterDefinition(
+                binding=binding,
+                type=item.get("type", "string"),
+                required=item.get("required", False),
+                description=item.get("description", ""),
+            )
+        parameters = ParametersDto(definitions=defs)
+    elif isinstance(raw_params, dict) and "definitions" in raw_params:
+        parameters = ParametersDto(**raw_params)
+
+    return TemplateDetailDto(
+        parameters=parameters,
+        layout=raw.get("layout"),
+        layoutRules=raw.get("layoutRules"),
+        baseLayer=raw.get("baseLayer"),
+        thumbnails=ThumbnailsDto(layout=None),
+    )
+
+
 router = APIRouter(prefix="/api/v1/templates", tags=["Templates"])
-
-
-@router.get("", response_model=TemplateListResponse)
-async def list_templates(
-    scope: TemplateScope = Query(TemplateScope.all),
-    book_spec_uid: str | None = Query(None),
-    spec_profile_uid: str | None = Query(None),
-    template_kind: TemplateKind | None = Query(None),
-    category: str | None = Query(None),
-    template_name: str | None = Query(None),
-    theme: str | None = Query(None),
-    sort: str | None = Query(None),
-    limit: int = Query(50, ge=1, le=100),
-    offset: int = Query(0, ge=0),
-    provider: BookProvider = Depends(get_book_provider),
-) -> TemplateListResponse:
-    """Return a paginated list of templates with optional filters."""
-    try:
-        data = await provider.list_templates(
-            scope=scope.value,
-            book_spec_uid=book_spec_uid,
-            spec_profile_uid=spec_profile_uid,
-            template_kind=template_kind.value if template_kind else None,
-            category=category,
-            template_name=template_name,
-            theme=theme,
-            sort=sort,
-            limit=limit,
-            offset=offset,
-        )
-    except ProviderError as exc:
-        _raise_http(exc)
-    return TemplateListResponse(success=True, message="ok", data=data)
 
 
 @router.get("/{template_uid}", response_model=TemplateDetailResponse)
@@ -83,15 +102,17 @@ async def get_template(
     template_uid: str,
     provider: BookProvider = Depends(get_book_provider),
 ) -> TemplateDetailResponse:
-    """Return the full detail of a single template by its UID."""
+    """Return the full detail of a single template by its UID.
+    SweetBook API 접근 불가 시 app/assets/ 의 로컬 JSON 파일로 fallback합니다.
+    """
     try:
         detail = await provider.get_template(template_uid)
     except ProviderError as exc:
         _log.warning(
-            "SweetBook get_template API 접근 불가 — mock template 반환 (uid=%s): %s",
+            "SweetBook get_template API 접근 불가 — 로컬 fallback 시도 (uid=%s): %s",
             template_uid, exc.message,
         )
-        detail = _MOCK_TEMPLATE_DETAIL
+        detail = _load_local_template(template_uid) or _GENERIC_MOCK
     return TemplateDetailResponse(success=True, message="ok", data=detail)
 
 
