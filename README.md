@@ -28,14 +28,21 @@ pip install -r requirements.txt
 
 # 환경 변수 설정
 cp .env.example .env
-# .env 파일을 열어 OPENAI_API_KEY 입력 (필수)
-# SweetBook / AWS 키가 없어도 mock 모드로 전체 플로우 동작
+# .env 를 열어 아래 두 항목만 채우면 전체 플로우 실행 가능
+#   OPENAI_API_KEY=sk-...   ← STORY_TEST_MODE=true 이면 없어도 됨
+#   SECRET_KEY=임의문자열
 
 # 서버 실행
 uvicorn app.main:app --reload --port 8000
 ```
 - API 서버: http://localhost:8000
 - Swagger UI: http://localhost:8000/docs
+
+> **Mock 모드 안내**  
+> `STORY_TEST_MODE=true`(기본값) 상태에서는 OpenAI · SweetBook · AWS 키 없이도  
+> 스토리 생성 → 미리보기 → 주문하기 전체 플로우가 동작합니다.  
+> SweetBook API 접근 불가 시 템플릿은 `app/assets/` 의 로컬 JSON 파일로 자동 대체되며,  
+> 주문 금액 및 주문 결과도 mock 값으로 반환됩니다.
 
 **② 프론트엔드**
 ```bash
