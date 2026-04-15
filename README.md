@@ -12,40 +12,66 @@
 &nbsp;&nbsp;
 <h2>💻 실행 방법</h2>
 
-``` python
-  # 설치 및 환경 설정
-  # 환경 변수 설정(.env)
-  # 실행
-```
-``` python
-  # 설치 및 환경 설정
-  # 환경 변수 설정(.env)
-  # 실행
-```
+> **사전 요구사항**: Python 3.12+, Node.js 18+
 
-``` python
-  # 설치 및 환경 설정
-  # 환경 변수 설정(.env)
-  # 실행
+**① 백엔드**
+```bash
+cd backend
+
+# 가상환경 생성 및 활성화
+python -m venv .venv
+source .venv/bin/activate          # Mac/Linux
+# .\.venv\Scripts\Activate.ps1    # Windows PowerShell
+
+# 패키지 설치
+pip install -r requirements.txt
+
+# 환경 변수 설정
+cp .env.example .env
+# .env 파일을 열어 OPENAI_API_KEY 입력 (필수)
+# SweetBook / AWS 키가 없어도 mock 모드로 전체 플로우 동작
+
+# 서버 실행
+uvicorn app.main:app --reload --port 8000
 ```
+- API 서버: http://localhost:8000
+- Swagger UI: http://localhost:8000/docs
+
+**② 프론트엔드**
+```bash
+cd frontend
+
+npm install
+npm run dev
+```
+- 브라우저: http://localhost:5173
    
 &nbsp;&nbsp;
 <h2> 📋 사용한 API 목록</h2>
 
-| Rank | THING-TO-RANK |
-|-----:|---------------|
-|     1|    javascript |
-|     2|    python     |
-|     3|          sql  |
+**SweetBook API** (`https://api-sandbox.sweetbook.com/v1`)
+
+| Method | Endpoint | 용도 |
+|---|---|---|
+| GET | `/templates/{templateUid}` | 템플릿 상세 조회 (프리뷰 레이아웃) |
+| POST | `/books` | DRAFT 책 생성 |
+| POST | `/books/{bookUid}/cover` | 표지 이미지 업로드 |
+| POST | `/books/{bookUid}/contents` | 내지 페이지 업로드 |
+| POST | `/books/{bookUid}/finalization` | 책 완성 처리 |
+| POST | `/orders/estimate` | 주문 금액 사전 조회 |
+| POST | `/orders` | 주문 생성 |
+| GET | `/orders` | 주문 목록 조회 |
+| GET | `/orders/{orderUid}` | 주문 상세 조회 |
+| POST | `/orders/{orderUid}/cancel` | 주문 취소 |
+| PATCH | `/orders/{orderUid}/shipping` | 배송지 수정 |
 
 &nbsp;&nbsp;
 <h2>🤖 AI 도구 사용 내역</h2>
 
 | AI 도구 | 활용 내용 |
-|-----:|---------------|
-|Claude Code|    백엔드 AP |
-|     2|    python     |
-|     3|          sql  |
+|---|---|
+| Claude Code | 백엔드 API 설계 및 구현, 코드 리뷰, 디버깅 |
+| ChatGPT | 아이디어 기획 및 요구사항 정리 |
 
 &nbsp;&nbsp;
 <h2>🔨 설계 의도</h2>
