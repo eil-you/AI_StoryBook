@@ -28,8 +28,8 @@ You MUST respond with valid JSON only, in this exact format:
     ...
   ]
 }
-The pages array MUST have between 24 and 30 paragraphs. This is a hard requirement — do NOT return fewer than 24 paragraphs under any circumstances.
-Keep each paragraph short (2-4 sentences) so the story flows naturally page by page.
+The pages array MUST have between 24 and 26 paragraphs. This is a hard requirement — do NOT return fewer than 24 paragraphs under any circumstances.
+Keep each paragraph short (2 sentences) so the story flows naturally page by page.
 The title and all page text MUST be written in Korean.
 Do not include any text outside the JSON object."""
 
@@ -98,9 +98,8 @@ class AIService:
         if get_settings().STORY_TEST_MODE:
             logger.info("STORY_TEST_MODE enabled — returning dummy story for %r", character_name)
             from app.services.dummy_story import build_dummy_story
-            from app.services.image_storage import _get_test_image_url
 
-            raw = build_dummy_story(character_name, _get_test_image_url)
+            raw = build_dummy_story(character_name)
             return StoryData(
                 title=raw["title"],
                 cover_image_url=raw["cover_image_url"],
