@@ -45,30 +45,31 @@ class SweetBookPublishError(Exception):
 
 _PAGE_MIN = 24
 _PAGE_MAX = 30
-_PAGE_INCREMENT = 1
+_PAGE_INCREMENT = 2          # SweetBook은 짝수 페이지만 허용: 24, 26, 28, 30
+
+# 홀수 페이지를 짝수로 맞출 때 추가하는 빈 페이지 템플릿 UID
+_FILLER_TEMPLATE_UID = "1zWsJbGghVO4"
 
 
 def _validate_page_count(page_count: int) -> None:
     """Raise ``SweetBookPublishError`` if *page_count* violates BookSpec rules.
 
-    Rules (pageMin=24, pageMax=30, pageIncrement=1):
-      - page_count >= _PAGE_MIN
-      - page_count <= _PAGE_MAX
-      - (page_count - _PAGE_MIN) % _PAGE_INCREMENT == 0
+    SweetBook은 짝수 페이지만 허용합니다 (pageIncrement=2).
     Valid counts: 24, 26, 28, 30
+    홀수 페이지는 publish 단계에서 filler로 자동 보정되므로 여기서는
+    보정 후(짝수) 값을 전달받습니다.
     """
     if page_count < _PAGE_MIN:
         raise SweetBookPublishError(
-            f"Page count {page_count} is below the minimum of {_PAGE_MIN}."
+            f"페이지 수 {page_count}이 최소 {_PAGE_MIN}페이지보다 적습니다."
         )
     if page_count > _PAGE_MAX:
         raise SweetBookPublishError(
-            f"Page count {page_count} exceeds the maximum of {_PAGE_MAX}."
+            f"페이지 수 {page_count}이 최대 {_PAGE_MAX}페이지를 초과합니다."
         )
     if (page_count - _PAGE_MIN) % _PAGE_INCREMENT != 0:
         raise SweetBookPublishError(
-            f"Page count {page_count} is not a valid increment. "
-            f"Valid counts: 24, 26, 28, 30."
+            f"페이지 수 {page_count}은 유효하지 않습니다. 허용: 24, 26, 28, 30."
         )
 
 
@@ -439,11 +440,34 @@ async def publish_contents_to_sweetbook(
                 "Published page %d/%d for book_id=%d",
                 page.page_number, len(pages), book_id,
             )
+
+        # 홀수 페이지이면 filler 1장 추가해서 짝수로 맞춤
+        if len(pages) % 2 != 0:
+            logger.info(
+                "Odd page count (%d) — adding filler page (template=%r) for book_id=%d",
+                len(pages), _FILLER_TEMPLATE_UID, book_id,
+            )
+            try:
+                filler_result = await provider.add_content(
+                    book_uid=sweetbook_book_uid,
+                    template_uid=_FILLER_TEMPLATE_UID,
+                    parameters=None,
+                    upload_files=None,
+                )
+                content_responses.append(filler_result)
+                logger.info(
+                    "Filler page added — total SweetBook pages: %d (book_id=%d)",
+                    len(content_responses), book_id,
+                )
+            except ProviderError as exc:
+                raise SweetBookPublishError(
+                    f"Failed to add filler page for book_id={book_id}: {exc.message}"
+                ) from exc
     finally:
         await provider.close()
 
     logger.info(
-        "Successfully published %d pages of book_id=%d to SweetBook.",
+        "Successfully published %d pages (including filler if any) of book_id=%d to SweetBook.",
         len(content_responses), book_id,
     )
     return content_responses
@@ -463,14 +487,17 @@ async def finalize_sweetbook_book(
     sweetbook_book_uid = book.sweetbook_book_uid
 
     page_result = await db.execute(select(Page).where(Page.book_id == book_id))
-    page_count = len(page_result.scalars().all())
-    _validate_page_count(page_count)
+    local_page_count = len(page_result.scalars().all())
+
+    # publish 단계에서 홀수면 filler 1장이 추가됐으므로 짝수로 올림
+    effective_page_count = local_page_count + (1 if local_page_count % 2 != 0 else 0)
+    _validate_page_count(effective_page_count)
 
     provider = SweetBookProvider(api_key=settings.SWEETBOOK_API_KEY)
     try:
         logger.info(
-            "Finalizing SweetBook book %r (local book_id=%d, pages=%d)",
-            sweetbook_book_uid, book_id, page_count,
+            "Finalizing SweetBook book %r (local book_id=%d, local_pages=%d, effective_pages=%d)",
+            sweetbook_book_uid, book_id, local_page_count, effective_page_count,
         )
         data = await provider.finalize_book(sweetbook_book_uid)
     except ProviderError as exc:

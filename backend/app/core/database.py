@@ -29,6 +29,13 @@ async def init_db() -> None:
             await conn.execute(
                 text("ALTER TABLE books ADD COLUMN cover_published BOOLEAN NOT NULL DEFAULT 0")
             )
+        # 기존 DB에 sweetbook_order_uid 컬럼이 없으면 추가
+        result2 = await conn.execute(text("PRAGMA table_info(orders)"))
+        order_columns = {row[1] for row in result2.fetchall()}
+        if "sweetbook_order_uid" not in order_columns:
+            await conn.execute(
+                text("ALTER TABLE orders ADD COLUMN sweetbook_order_uid VARCHAR(100)")
+            )
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:

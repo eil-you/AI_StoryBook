@@ -7,6 +7,7 @@ import DashboardPage from "./pages/DashboardPage";
 import StoryGeneratePage from "./pages/StoryGeneratePage";
 import StoryPreviewPage from "./pages/StoryPreviewPage";
 import OrderPage from "./pages/OrderPage";
+import OrderHistoryPage from "./pages/OrderHistoryPage";
 
 export default function App() {
   return (
@@ -44,6 +45,14 @@ export default function App() {
             element={
               <ProtectedRoute>
                 <OrderPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/orders"
+            element={
+              <ProtectedRoute>
+                <OrderHistoryPage />
               </ProtectedRoute>
             }
           />

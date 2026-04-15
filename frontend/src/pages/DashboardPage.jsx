@@ -45,9 +45,14 @@ export default function DashboardPage() {
     <Layout>
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold">내 동화책</h1>
-        <Link to="/generate" className="btn-primary">
-          + 새 동화 만들기
-        </Link>
+        <div className="flex gap-2">
+          <Link to="/orders" className="btn-secondary text-sm">
+            주문 내역
+          </Link>
+          <Link to="/generate" className="btn-primary">
+            + 새 동화 만들기
+          </Link>
+        </div>
       </div>
 
       {loading && <LoadingSpinner />}

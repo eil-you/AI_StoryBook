@@ -8,3 +8,12 @@ export const createOrder = (data) =>
 
 export const listOrders = (params = {}) =>
   client.get("/api/v1/orders", { params }).then((r) => r.data);
+
+export const getOrder = (orderUid) =>
+  client.get(`/api/v1/orders/${orderUid}`).then((r) => r.data);
+
+export const cancelOrder = (orderUid, cancelReason) =>
+  client.post(`/api/v1/orders/${orderUid}/cancel`, { cancel_reason: cancelReason }).then((r) => r.data);
+
+export const updateShipping = (orderUid, data) =>
+  client.patch(`/api/v1/orders/${orderUid}/shipping`, data).then((r) => r.data);
