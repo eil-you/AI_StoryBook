@@ -302,15 +302,58 @@ class SweetBookProvider(BookProvider):
             ) from exc
 
     async def get_template(self, template_uid: str) -> TemplateDetailDto:
-        """Fetch the full detail of a single template by its UID."""
+        """Fetch the full detail of a single template by its UID.
+
+        If the detail endpoint does not return a thumbnail URL, fall back to
+        the list endpoint to find the thumbnail for this template.
+        """
+        import logging
+        _log = logging.getLogger(__name__)
+
         raw = await self._get(f"/templates/{template_uid}")
         try:
-            return TemplateDetailResponse.model_validate(raw).data
+            detail = TemplateDetailResponse.model_validate(raw).data
         except ValidationError as exc:
             raise ProviderError(
                 code=ErrorCode.ERR002,
                 message=f"Unexpected template detail response for '{template_uid}': {exc}",
             ) from exc
+
+        _log.info(
+            "Template detail fetched uid=%s thumbnails=%s",
+            template_uid,
+            detail.thumbnails,
+        )
+
+        # If the detail endpoint didn't return a thumbnail URL, search the list.
+        if detail.thumbnails is None or detail.thumbnails.layout is None:
+            _log.info(
+                "Thumbnail missing in detail for uid=%s — searching list endpoint",
+                template_uid,
+            )
+            try:
+                list_data = await self.list_templates(limit=100)
+                for tmpl in list_data.templates:
+                    if tmpl.template_uid == template_uid:
+                        detail = TemplateDetailDto(
+                            parameters=detail.parameters,
+                            layout=detail.layout,
+                            layout_rules=detail.layout_rules,
+                            base_layer=detail.base_layer,
+                            thumbnails=tmpl.thumbnails,
+                        )
+                        _log.info(
+                            "Found thumbnail via list for uid=%s url=%s",
+                            template_uid,
+                            tmpl.thumbnails.layout if tmpl.thumbnails else None,
+                        )
+                        break
+            except Exception as exc:
+                _log.warning(
+                    "List-fallback for thumbnail failed uid=%s: %s", template_uid, exc
+                )
+
+        return detail
 
     async def add_cover(
         self,

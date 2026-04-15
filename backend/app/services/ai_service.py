@@ -25,10 +25,26 @@ Keep each paragraph short (2-4 sentences) so the story flows naturally page by p
 Do not include any text outside the JSON object."""
 
 _IMAGE_STYLE = (
-    "anime-style children's book illustration, vibrant and colorful, "
-    "cute anime art style, expressive characters, detailed background, "
-    "warm lighting, soft cel shading, age-appropriate, no text"
+    "children's picture book illustration, soft watercolor style, "
+    "warm and cozy atmosphere, pastel colors, gentle brushstrokes, "
+    "age-appropriate for toddlers, no text, no words, wholesome and cheerful"
 )
+
+_DUMMY_IMAGE_URL = "https://placehold.co/1024x1024/FFF9C4/A0522D?text=Story+Page"
+
+_PROMPT_TRANSLATOR_SYSTEM = """You are a DALL-E 3 prompt engineer specializing in children's picture books.
+Your job is to convert story scene descriptions into safe, policy-compliant English image prompts.
+
+Rules:
+- Output ONLY the image prompt in English, nothing else.
+- NEVER include character names, real names, or any proper nouns.
+- Describe the scene visually and generically: use "a cheerful young child" not a name.
+- Keep it wholesome, warm, and age-appropriate (target audience: toddlers/preschoolers).
+- Focus on visual elements: setting, mood, colors, actions.
+- Avoid any ambiguous, violent, or scary content.
+- Keep the prompt under 150 words.
+- Start with: "A warm and cheerful children's book illustration of"
+"""
 
 
 class PageData(BaseModel):
@@ -173,6 +189,88 @@ class AIService:
 
         return story.title, story.pages
 
+    async def _translate_to_image_prompt(
+        self,
+        scene_description: str,
+        background: str,
+        genre: str,
+    ) -> str:
+        """한글 장면 묘사를 DALL-E 안전 정책을 준수하는 영문 프롬프트로 변환합니다.
+
+        GPT에게 번역을 맡겨 한글 텍스트가 DALL-E에 직접 전달되지 않도록 합니다.
+        변환 실패 시 기본 안전 프롬프트를 반환합니다.
+        """
+        user_message = (
+            f"Scene (Korean): {scene_description}\n"
+            f"Setting: {background}\n"
+            f"Genre: {genre}\n"
+            "Convert this into a safe DALL-E 3 image prompt."
+        )
+        try:
+            response = await self._client.chat.completions.create(
+                model=self._model,
+                messages=[
+                    {"role": "system", "content": _PROMPT_TRANSLATOR_SYSTEM},
+                    {"role": "user", "content": user_message},
+                ],
+                temperature=0.5,
+                max_tokens=200,
+            )
+            translated = response.choices[0].message.content or ""
+            return translated.strip()
+        except Exception as exc:
+            logger.warning("Prompt translation failed, using fallback prompt: %s", exc)
+            return (
+                f"A warm and cheerful children's book illustration of "
+                f"a happy young child on an adventure in a {background} setting, "
+                f"{genre} style, bright and colorful"
+            )
+
+    async def _call_dalle(self, prompt: str) -> str:
+        """DALL-E 이미지를 생성하고 URL을 반환합니다.
+
+        IMAGE_TEST_MODE=True 이면 DALL-E를 호출하지 않고 즉시 더미 URL을 반환합니다.
+        400 (content_policy_violation) 또는 500 (server error) 발생 시
+        시스템이 멈추지 않도록 더미 이미지 URL을 반환합니다.
+        """
+        from app.core.config import get_settings
+        from app.services.image_storage import _get_test_image_url
+
+        if get_settings().IMAGE_TEST_MODE:
+            logger.debug("IMAGE_TEST_MODE enabled — skipping DALL-E call")
+            return _get_test_image_url()
+
+        full_prompt = f"{_IMAGE_STYLE}. {prompt}"
+        try:
+            response = await self._client.images.generate(
+                model=self._image_model,
+                prompt=full_prompt,
+                size="1024x1024",
+                quality="standard",
+                n=1,
+            )
+            dalle_url = response.data[0].url
+            if not dalle_url:
+                logger.error("DALL-E returned no URL in response — using dummy image")
+                return _DUMMY_IMAGE_URL
+            return await download_and_save(dalle_url)
+        except APIStatusError as e:
+            if e.status_code == 400:
+                logger.warning(
+                    "DALL-E content policy violation (400) — using dummy image. prompt=%r",
+                    prompt[:100],
+                )
+            else:
+                logger.error(
+                    "DALL-E API error (status=%s) — using dummy image: %s",
+                    e.status_code,
+                    e,
+                )
+            return _DUMMY_IMAGE_URL
+        except (APITimeoutError, RateLimitError) as e:
+            logger.error("DALL-E unavailable (%s) — using dummy image: %s", type(e).__name__, e)
+            return _DUMMY_IMAGE_URL
+
     async def _generate_cover_image(
         self,
         title: str,
@@ -180,31 +278,10 @@ class AIService:
         background: str,
         genre: str,
     ) -> str:
-        image_prompt = (
-            f"{_IMAGE_STYLE}, {genre} children's book cover, "
-            f"{background} setting, main character named {character_name}, "
-            f"book title theme: {title}, dramatic and eye-catching composition"
+        # test mode 면 번역 GPT 호출도 스킵
+        return await self._call_dalle(
+            f"Book cover for a {genre} story, {background} setting, title: {title}"
         )
-        try:
-            response = await self._client.images.generate(
-                model=self._image_model,
-                prompt=image_prompt,
-                size="1024x1024",
-                quality="standard",
-                n=1,
-            )
-        except APITimeoutError as e:
-            logger.error("Cover image generation timed out: %s", e)
-            raise StoryGenerationError("Cover image generation timed out. Please try again.") from e
-        except RateLimitError as e:
-            logger.error("Cover image generation rate limit exceeded: %s", e)
-            raise StoryGenerationError("Service is temporarily busy. Please try again in a moment.") from e
-        except APIStatusError as e:
-            logger.error("Cover image generation API error (status=%s): %s", e.status_code, e)
-            raise StoryGenerationError(f"Cover image generation failed: {e.message}") from e
-
-        dalle_url = response.data[0].url
-        return await download_and_save(dalle_url)
 
     async def _generate_image(
         self,
@@ -213,28 +290,11 @@ class AIService:
         background: str,
         genre: str,
     ) -> str:
-        image_prompt = (
-            f"{_IMAGE_STYLE}, {genre} story set in {background}, "
-            f"main character named {character_name}, scene: {page_text[:200]}"
-        )
-        await asyncio.sleep(13)
-        try:
-            response = await self._client.images.generate(
-                model=self._image_model,
-                prompt=image_prompt,
-                size="1024x1024",
-                quality="standard",
-                n=1,
-            )
-        except APITimeoutError as e:
-            logger.error("Image generation timed out: %s", e)
-            raise StoryGenerationError("Image generation timed out. Please try again.") from e
-        except RateLimitError as e:
-            logger.error("Image generation rate limit exceeded: %s", e)
-            raise StoryGenerationError("Service is temporarily busy. Please try again in a moment.") from e
-        except APIStatusError as e:
-            logger.error("Image generation API error (status=%s): %s", e.status_code, e)
-            raise StoryGenerationError(f"Image generation failed: {e.message}") from e
+        # test mode 면 번역 GPT 호출도 스킵
+        from app.core.config import get_settings
 
-        dalle_url = response.data[0].url
-        return await download_and_save(dalle_url)
+        if not get_settings().IMAGE_TEST_MODE:
+            page_text = await self._translate_to_image_prompt(page_text, background, genre)
+            await asyncio.sleep(13)
+
+        return await self._call_dalle(page_text)

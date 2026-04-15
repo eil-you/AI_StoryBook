@@ -13,6 +13,7 @@ import logging
 from functools import partial
 
 import boto3
+import httpx
 from botocore.exceptions import ClientError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -44,13 +45,13 @@ class SweetBookPublishError(Exception):
 
 _PAGE_MIN = 24
 _PAGE_MAX = 30
-_PAGE_INCREMENT = 2
+_PAGE_INCREMENT = 1
 
 
 def _validate_page_count(page_count: int) -> None:
     """Raise ``SweetBookPublishError`` if *page_count* violates BookSpec rules.
 
-    Rules (pageMin=24, pageMax=30, pageIncrement=2):
+    Rules (pageMin=24, pageMax=30, pageIncrement=1):
       - page_count >= _PAGE_MIN
       - page_count <= _PAGE_MAX
       - (page_count - _PAGE_MIN) % _PAGE_INCREMENT == 0
@@ -76,6 +77,12 @@ def _validate_page_count(page_count: int) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _is_s3_url(image_url: str, bucket: str, region: str) -> bool:
+    """Return True if image_url is an S3 public URL for the given bucket/region."""
+    prefix = f"https://{bucket}.s3.{region}.amazonaws.com/"
+    return image_url.startswith(prefix)
+
+
 def _parse_s3_key(image_url: str, bucket: str, region: str) -> str:
     """Extract the S3 object key from a full public S3 URL.
 
@@ -83,10 +90,6 @@ def _parse_s3_key(image_url: str, bucket: str, region: str) -> str:
         https://{bucket}.s3.{region}.amazonaws.com/{key}
     """
     prefix = f"https://{bucket}.s3.{region}.amazonaws.com/"
-    if not image_url.startswith(prefix):
-        raise SweetBookPublishError(
-            f"Unexpected S3 URL format (cannot extract key): {image_url!r}"
-        )
     return image_url[len(prefix):]
 
 
@@ -111,6 +114,31 @@ def _sync_download_from_s3(bucket: str, key: str, aws_access_key_id: str, aws_se
         ) from exc
 
 
+async def _download_image_bytes(image_url: str, bucket: str, region: str, aws_access_key_id: str, aws_secret_access_key: str) -> bytes:
+    """Download image bytes from S3, a local static path, or a plain HTTP URL."""
+    if _is_s3_url(image_url, bucket, region):
+        key = _parse_s3_key(image_url, bucket, region)
+        logger.debug("Downloading from S3 key %r", key)
+        return await asyncio.to_thread(
+            partial(_sync_download_from_s3, bucket, key, aws_access_key_id, aws_secret_access_key)
+        )
+    # 로컬 static 경로 (/static/...)이면 파일시스템에서 직접 읽기
+    if image_url.startswith("/static/"):
+        from pathlib import Path
+        static_root = Path(__file__).resolve().parents[2] / "static"
+        local_path = static_root / image_url[len("/static/"):]
+        logger.debug("Reading local static file %r", local_path)
+        if not local_path.exists():
+            raise SweetBookPublishError(f"Local static file not found: {local_path}")
+        return await asyncio.to_thread(local_path.read_bytes)
+    # 일반 URL이면 HTTP로 직접 다운로드
+    logger.debug("Downloading from plain URL %r", image_url)
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        response = await client.get(image_url)
+        response.raise_for_status()
+        return response.content
+
+
 async def _download_image(
     page: Page,
     bucket: str,
@@ -118,15 +146,13 @@ async def _download_image(
     aws_access_key_id: str,
     aws_secret_access_key: str,
 ) -> tuple[Page, bytes]:
-    """Return (page, image_bytes) after downloading from S3."""
+    """Return (page, image_bytes) — S3 URL이 아니면 일반 HTTP 다운로드를 사용합니다."""
     if not page.image_url:
         raise SweetBookPublishError(
-            f"Page {page.page_number} has no image_url — cannot download from S3."
+            f"Page {page.page_number} has no image_url — cannot download image."
         )
-    key = _parse_s3_key(page.image_url, bucket, region)
-    logger.debug("Downloading S3 key %r for page %d", key, page.page_number)
-    image_bytes: bytes = await asyncio.to_thread(
-        partial(_sync_download_from_s3, bucket, key, aws_access_key_id, aws_secret_access_key)
+    image_bytes = await _download_image_bytes(
+        page.image_url, bucket, region, aws_access_key_id, aws_secret_access_key
     )
     return page, image_bytes
 
@@ -134,6 +160,10 @@ async def _download_image(
 # ---------------------------------------------------------------------------
 # Per-page pipeline step
 # ---------------------------------------------------------------------------
+
+
+_MAX_RETRIES = 3
+_RETRY_BACKOFF_BASE = 2.0  # seconds
 
 
 async def _process_page(
@@ -148,24 +178,42 @@ async def _process_page(
     image_field: str,
     extra_parameters: dict[str, str],
 ) -> ContentData:
-    """Full pipeline for one page: S3 download → SweetBook contents API."""
+    """Full pipeline for one page: S3 download → SweetBook contents API (with retry)."""
     _, image_bytes = await _download_image(page, bucket, region, aws_access_key_id, aws_secret_access_key)
     filename = f"page_{page.page_number}.png"
-    logger.debug("Adding content for page %d to SweetBook book %r", page.page_number, book_uid)
-
     parameters = {**extra_parameters, "text": page.text_content or ""}
 
-    try:
-        return await provider.add_content(
-            book_uid=book_uid,
-            template_uid=template_uid,
-            parameters=parameters,
-            upload_files={image_field: (filename, image_bytes, "image/png")},
-        )
-    except ProviderError as exc:
-        raise SweetBookPublishError(
-            f"SweetBook API error for page {page.page_number}: {exc.message}"
-        ) from exc
+    last_exc: Exception | None = None
+    for attempt in range(1, _MAX_RETRIES + 1):
+        try:
+            logger.debug(
+                "Adding content for page %d to SweetBook book %r (attempt %d/%d)",
+                page.page_number, book_uid, attempt, _MAX_RETRIES,
+            )
+            return await provider.add_content(
+                book_uid=book_uid,
+                template_uid=template_uid,
+                parameters=parameters,
+                upload_files={image_field: (filename, image_bytes, "image/png")},
+            )
+        except ProviderError as exc:
+            last_exc = exc
+            if attempt < _MAX_RETRIES:
+                wait = _RETRY_BACKOFF_BASE ** (attempt - 1)
+                logger.warning(
+                    "SweetBook API error for page %d (attempt %d/%d) — retrying in %.1fs: %s",
+                    page.page_number, attempt, _MAX_RETRIES, wait, exc.message,
+                )
+                await asyncio.sleep(wait)
+            else:
+                logger.error(
+                    "SweetBook API error for page %d — all %d attempts failed: %s",
+                    page.page_number, _MAX_RETRIES, exc.message,
+                )
+
+    raise SweetBookPublishError(
+        f"SweetBook API error for page {page.page_number} after {_MAX_RETRIES} attempts: {last_exc}"
+    ) from last_exc
 
 
 # ---------------------------------------------------------------------------
@@ -280,13 +328,22 @@ async def publish_cover_to_sweetbook(
     book_id: int,
     cover_template_uid: str,
     db: AsyncSession,
-) -> None:
+) -> bool:
     """Upload the cover image to the SweetBook DRAFT book.
 
     Looks up ``sweetbook_book_uid`` from the local Book record.
+    이미 표지가 등록된 경우(cover_published=True) 업로드를 건너뜁니다.
+
+    Returns:
+        True if the cover was uploaded, False if it was already registered (skipped).
     """
     settings = get_settings()
     book = await _get_book_with_sweetbook_uid(book_id, db)
+
+    if book.cover_published:
+        logger.info("Cover already registered for book_id=%d — skipping", book_id)
+        return False
+
     sweetbook_book_uid = book.sweetbook_book_uid
 
     if not book.cover_image_url:
@@ -298,15 +355,12 @@ async def publish_cover_to_sweetbook(
     try:
         cover_image_field, cover_text_field = await _get_template_fields(provider, cover_template_uid)
 
-        cover_key = _parse_s3_key(book.cover_image_url, settings.AWS_S3_BUCKET, settings.AWS_REGION)
-        cover_bytes: bytes = await asyncio.to_thread(
-            partial(
-                _sync_download_from_s3,
-                settings.AWS_S3_BUCKET,
-                cover_key,
-                settings.AWS_ACCESS_KEY_ID,
-                settings.AWS_SECRET_ACCESS_KEY,
-            )
+        cover_bytes: bytes = await _download_image_bytes(
+            book.cover_image_url,
+            settings.AWS_S3_BUCKET,
+            settings.AWS_REGION,
+            settings.AWS_ACCESS_KEY_ID,
+            settings.AWS_SECRET_ACCESS_KEY,
         )
 
         cover_parameters = {cover_text_field: book.title} if cover_text_field else None
@@ -324,7 +378,10 @@ async def publish_cover_to_sweetbook(
     finally:
         await provider.close()
 
+    book.cover_published = True
+    await db.commit()
     logger.info("Cover added to SweetBook book %r (book_id=%d)", sweetbook_book_uid, book_id)
+    return True
 
 
 async def publish_contents_to_sweetbook(
@@ -359,12 +416,13 @@ async def publish_contents_to_sweetbook(
     )
 
     provider = SweetBookProvider(api_key=settings.SWEETBOOK_API_KEY)
+    content_responses: list[ContentData] = []
     try:
         image_field, _ = await _get_template_fields(provider, content_template_uid)
         logger.info("Using image field %r from template %r", image_field, content_template_uid)
 
-        tasks = [
-            _process_page(
+        for page in pages:
+            result = await _process_page(
                 page,
                 settings.AWS_S3_BUCKET,
                 settings.AWS_REGION,
@@ -376,27 +434,14 @@ async def publish_contents_to_sweetbook(
                 image_field,
                 extra_parameters or {},
             )
-            for page in pages
-        ]
-        outcomes = await asyncio.gather(*tasks, return_exceptions=True)
+            content_responses.append(result)
+            logger.info(
+                "Published page %d/%d for book_id=%d",
+                page.page_number, len(pages), book_id,
+            )
     finally:
         await provider.close()
 
-    failures = [
-        (page, outcome)
-        for page, outcome in zip(pages, outcomes)
-        if isinstance(outcome, BaseException)
-    ]
-    if failures:
-        detail = "; ".join(
-            f"page {page.page_number}: {outcome}"
-            for page, outcome in failures
-        )
-        raise SweetBookPublishError(
-            f"{len(failures)}/{len(pages)} page(s) failed — {detail}"
-        )
-
-    content_responses: list[ContentData] = list(outcomes)
     logger.info(
         "Successfully published %d pages of book_id=%d to SweetBook.",
         len(content_responses), book_id,

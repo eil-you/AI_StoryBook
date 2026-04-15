@@ -25,6 +25,7 @@ class Book(TimestampMixin, Base):
         Enum(BookStatus), default=BookStatus.draft, nullable=False
     )
     is_deleted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    cover_published: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, server_default="0")
 
     user: Mapped["User"] = relationship("User", back_populates="books")
     pages: Mapped[list["Page"]] = relationship(

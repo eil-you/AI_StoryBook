@@ -5,6 +5,7 @@ class BookStatus(str, enum.Enum):
     draft = "draft"
     processing = "processing"
     completed = "completed"
+    finalized = "finalized"
 
 
 class OrderStatus(str, enum.Enum):

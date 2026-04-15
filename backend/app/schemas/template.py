@@ -43,7 +43,7 @@ class BindingKind(str, enum.Enum):
 
 
 class ThumbnailsDto(BaseModel):
-    layout: str = Field(..., description="URL of the layout thumbnail image")
+    layout: str | None = Field(None, description="URL of the layout thumbnail image")
 
 
 class TemplateDto(BaseModel):
@@ -109,6 +109,7 @@ class TemplateDetailDto(BaseModel):
     layout: Optional[dict] = None
     layout_rules: dict[str, Any] | None = Field(None, alias="layoutRules")
     base_layer: dict[str, Any] | None = Field(None, alias="baseLayer")
+    thumbnails: ThumbnailsDto | None = None
 
     model_config = {"populate_by_name": True}
 
