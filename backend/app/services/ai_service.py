@@ -77,6 +77,8 @@ class AIService:
         self._client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
         self._model = settings.OPENAI_MODEL
         self._image_model = settings.OPENAI_IMAGE_MODEL
+        # DALL-E rate limit: 동시 이미지 생성을 3개로 제한
+        self._image_semaphore = asyncio.Semaphore(3)
 
     async def generate_story(
         self,
@@ -253,6 +255,7 @@ class AIService:
         """DALL-E 이미지를 생성하고 URL을 반환합니다.
 
         IMAGE_TEST_MODE=True 이면 DALL-E를 호출하지 않고 즉시 더미 URL을 반환합니다.
+        세마포어로 동시 호출을 3개로 제한해 ConnectTimeout을 방지합니다.
         400 (content_policy_violation) 또는 500 (server error) 발생 시
         시스템이 멈추지 않도록 더미 이미지 URL을 반환합니다.
         """
@@ -264,35 +267,36 @@ class AIService:
             return _get_test_image_url()
 
         full_prompt = f"{_IMAGE_STYLE}. {prompt}"
-        try:
-            response = await self._client.images.generate(
-                model=self._image_model,
-                prompt=full_prompt,
-                size="1024x1024",
-                quality="standard",
-                n=1,
-            )
-            dalle_url = response.data[0].url
-            if not dalle_url:
-                logger.error("DALL-E returned no URL in response — using dummy image")
+        async with self._image_semaphore:
+            try:
+                response = await self._client.images.generate(
+                    model=self._image_model,
+                    prompt=full_prompt,
+                    size="1024x1024",
+                    quality="standard",
+                    n=1,
+                )
+                dalle_url = response.data[0].url
+                if not dalle_url:
+                    logger.error("DALL-E returned no URL in response — using dummy image")
+                    return _DUMMY_IMAGE_URL
+                return await download_and_save(dalle_url)
+            except APIStatusError as e:
+                if e.status_code == 400:
+                    logger.warning(
+                        "DALL-E content policy violation (400) — using dummy image. prompt=%r",
+                        prompt[:100],
+                    )
+                else:
+                    logger.error(
+                        "DALL-E API error (status=%s) — using dummy image: %s",
+                        e.status_code,
+                        e,
+                    )
                 return _DUMMY_IMAGE_URL
-            return await download_and_save(dalle_url)
-        except APIStatusError as e:
-            if e.status_code == 400:
-                logger.warning(
-                    "DALL-E content policy violation (400) — using dummy image. prompt=%r",
-                    prompt[:100],
-                )
-            else:
-                logger.error(
-                    "DALL-E API error (status=%s) — using dummy image: %s",
-                    e.status_code,
-                    e,
-                )
-            return _DUMMY_IMAGE_URL
-        except (APITimeoutError, RateLimitError) as e:
-            logger.error("DALL-E unavailable (%s) — using dummy image: %s", type(e).__name__, e)
-            return _DUMMY_IMAGE_URL
+            except (APITimeoutError, RateLimitError) as e:
+                logger.error("DALL-E unavailable (%s) — using dummy image: %s", type(e).__name__, e)
+                return _DUMMY_IMAGE_URL
 
     async def _generate_cover_image(
         self,
@@ -318,6 +322,5 @@ class AIService:
 
         if not get_settings().IMAGE_TEST_MODE:
             page_text = await self._translate_to_image_prompt(page_text, background, genre)
-            await asyncio.sleep(13)
 
         return await self._call_dalle(page_text)
