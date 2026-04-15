@@ -1,0 +1,111 @@
+{
+    "uid": "7jOxkBjj6VGe",
+    "name": "표지",
+    "templateName": "표지",
+    "theme": "어린이동화",
+    "templateKind": "cover",
+    "bookSpecUid": "SQUAREBOOK_HC",
+    "isPublic": false,
+    "layoutRules": {
+      "flow": {},
+      "margin": {
+        "pageMargin": {
+          "head": 0,
+          "tail": 0,
+          "fore": 0,
+          "spine": 0
+        }
+      },
+      "shiftUpOnHide": false
+    },
+    "layout": {
+      "backgroundColor": "#FFFFFFFF",
+      "elements": [
+        {
+          "element_id": "front-photo",
+          "type": "photo",
+          "position": {
+            "x": 1057.3010958209504,
+            "y": 93.15932656342054
+          },
+          "width": 898.6989041790495,
+          "height": 907.6406734365794,
+          "fileName": "$$coverphoto$$",
+          "fit": "cover",
+          "cornerRadius": 20
+        },
+        {
+          "element_id": "book-back",
+          "type": "rectangle",
+          "position": {
+            "x": 1013.24,
+            "y": 0
+          },
+          "width": 47.2,
+          "height": 1041.12,
+          "color": "#FFFFFFFF",
+          "logoImage": "Transparent",
+          "logoHeight": 28
+        },
+        {
+          "element_id": "spine-subtitle",
+          "type": "text",
+          "position": {
+            "x": 1011.36,
+            "y": 95
+          },
+          "width": 48,
+          "height": 946.12,
+          "text": "$$title$$",
+          "fontFamily": "tvN 즐거운이야기 Bold",
+          "fontSize": 28,
+          "textBold": false,
+          "textBrush": "#FF000000",
+          "backgroundColor": "#00FFFFFF",
+          "textAlignment": "Left",
+          "verticalAlignment": "Center",
+          "isVertical": true,
+          "isDynamic": false,
+          "splittable": false
+        },
+        {
+          "element_id": "front-title",
+          "type": "text",
+          "position": {
+            "x": 1127.6343205719081,
+            "y": 260.34336340836165
+          },
+          "width": 780.4731936223964,
+          "height": 73.84673879974261,
+          "text": "$$title$$",
+          "fontFamily": "나눔고딕",
+          "fontSize": 44,
+          "textBold": true,
+          "textBrush": "#FF000000",
+          "backgroundColor": "#00FFFFFF",
+          "textAlignment": "Center",
+          "verticalAlignment": "Top",
+          "textLineHeight": 60,
+          "isDynamic": false,
+          "splittable": false
+        }
+      ]
+    },
+    "parameters": [
+      {
+        "name": "title",
+        "binding": "text",
+        "type": "string",
+        "required": true,
+        "defaultValue": "민지의 우주 탐험",
+        "description": ""
+      },
+      {
+        "name": "coverphoto",
+        "binding": "file",
+        "type": "string",
+        "required": true,
+        "description": ""
+      }
+    ]
+  }

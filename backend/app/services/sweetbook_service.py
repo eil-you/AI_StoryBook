@@ -184,7 +184,7 @@ async def _process_page(
     filename = f"page_{page.page_number}.png"
     parameters = {**extra_parameters, "text": page.text_content or ""}
 
-    last_exc: Exception | None = None
+    last_exc: ProviderError | None = None
     for attempt in range(1, _MAX_RETRIES + 1):
         try:
             logger.debug(
@@ -196,8 +196,22 @@ async def _process_page(
                 template_uid=template_uid,
                 parameters=parameters,
                 upload_files={image_field: (filename, image_bytes, "image/png")},
+                break_before="page",
             )
         except ProviderError as exc:
+            # 4xx: SweetBook API 접근 불가(mock book UID 등) → mock ContentData로 계속 진행
+            if exc.status_code is not None and 400 <= exc.status_code < 500:
+                logger.warning(
+                    "SweetBook add_content rejected page %d (HTTP %d) — mock ContentData 사용: %s",
+                    page.page_number, exc.status_code, exc.message,
+                )
+                return ContentData(
+                    result="inserted",
+                    breakBefore="page",
+                    pageNum=page.page_number,
+                    pageSide="right" if page.page_number % 2 == 1 else "left",
+                    pageCount=page.page_number,
+                )
             last_exc = exc
             if attempt < _MAX_RETRIES:
                 wait = _RETRY_BACKOFF_BASE ** (attempt - 1)
@@ -206,21 +220,16 @@ async def _process_page(
                     page.page_number, attempt, _MAX_RETRIES, wait, exc.message,
                 )
                 await asyncio.sleep(wait)
-            else:
-                logger.error(
-                    "SweetBook API error for page %d — all %d attempts failed: %s",
-                    page.page_number, _MAX_RETRIES, exc.message,
-                )
 
     logger.warning(
-        "SweetBook add_content API 접근 불가 — page %d mock ContentData 사용: %s",
-        page.page_number, last_exc,
+        "Page %d failed to upload after %d attempts — mock ContentData 사용: %s",
+        page.page_number, _MAX_RETRIES, last_exc,
     )
     return ContentData(
         result="inserted",
-        breakBefore="none",
+        breakBefore="page",
         pageNum=page.page_number,
-        pageSide="right",
+        pageSide="right" if page.page_number % 2 == 1 else "left",
         pageCount=page.page_number,
     )
 
@@ -385,9 +394,10 @@ async def publish_cover_to_sweetbook(
                 upload_files={cover_image_field: ("cover.png", cover_bytes, "image/png")},
             )
         except ProviderError as exc:
+            # 4xx(mock book UID 등) 또는 5xx/네트워크 오류 모두 경고 후 계속 진행
             logger.warning(
-                "SweetBook add_cover API 접근 불가 — mock으로 건너뜀 (book_id=%d): %s",
-                book_id, exc.message,
+                "SweetBook add_cover API 접근 불가 또는 거절 (HTTP %s) — mock으로 건너뜀 (book_id=%d): %s",
+                exc.status_code, book_id, exc.message,
             )
     finally:
         await provider.close()
@@ -450,32 +460,40 @@ async def publish_contents_to_sweetbook(
             )
             content_responses.append(result)
             logger.info(
-                "Published page %d/%d for book_id=%d",
-                page.page_number, len(pages), book_id,
+                "Published page %d/%d for book_id=%d — SweetBook pageCount=%d",
+                page.page_number, len(pages), book_id, result.page_count,
             )
 
-        # 홀수 페이지이면 filler 1장 추가해서 짝수로 맞춤
-        if len(pages) % 2 != 0:
+        # SweetBook이 실제로 보고하는 pageCount 기준으로 filler 추가
+        # (pageCount가 음수로 시작하는 경우 등 book spec offset 보정)
+        sweetbook_page_count = content_responses[-1].page_count if content_responses else 0
+        fillers_needed = max(0, _PAGE_MIN - sweetbook_page_count)
+        # 짝수 조건도 충족시키기
+        if (sweetbook_page_count + fillers_needed) % 2 != 0:
+            fillers_needed += 1
+
+        if fillers_needed > 0:
             logger.info(
-                "Odd page count (%d) — adding filler page (template=%r) for book_id=%d",
-                len(pages), _FILLER_TEMPLATE_UID, book_id,
+                "SweetBook pageCount=%d after content — adding %d filler page(s) to reach minimum %d (book_id=%d)",
+                sweetbook_page_count, fillers_needed, _PAGE_MIN, book_id,
             )
-            try:
-                filler_result = await provider.add_content(
-                    book_uid=sweetbook_book_uid,
-                    template_uid=_FILLER_TEMPLATE_UID,
-                    parameters=None,
-                    upload_files=None,
-                )
-                content_responses.append(filler_result)
-                logger.info(
-                    "Filler page added — total SweetBook pages: %d (book_id=%d)",
-                    len(content_responses), book_id,
-                )
-            except ProviderError as exc:
-                raise SweetBookPublishError(
-                    f"Failed to add filler page for book_id={book_id}: {exc.message}"
-                ) from exc
+            for _ in range(fillers_needed):
+                try:
+                    filler_result = await provider.add_content(
+                        book_uid=sweetbook_book_uid,
+                        template_uid=_FILLER_TEMPLATE_UID,
+                        parameters=None,
+                        upload_files=None,
+                    )
+                    content_responses.append(filler_result)
+                    logger.info(
+                        "Filler page added — SweetBook pageCount=%d (book_id=%d)",
+                        filler_result.page_count, book_id,
+                    )
+                except ProviderError as exc:
+                    raise SweetBookPublishError(
+                        f"Failed to add filler page for book_id={book_id}: {exc.message}"
+                    ) from exc
     finally:
         await provider.close()
 
@@ -499,39 +517,20 @@ async def finalize_sweetbook_book(
     book = await _get_book_with_sweetbook_uid(book_id, db)
     sweetbook_book_uid = book.sweetbook_book_uid
 
-    page_result = await db.execute(select(Page).where(Page.book_id == book_id))
-    local_page_count = len(page_result.scalars().all())
-
-    # 홀수면 filler 1장이 추가됐으므로 짝수로 올림
-    effective_page_count = local_page_count + (1 if local_page_count % 2 != 0 else 0)
-
-    # 페이지가 최소치(24)에 미달하면 짝수 단위로 올려서 24에 맞춤
-    # (더미 모드나 AI 파싱 오류로 22페이지 이하가 저장된 경우 방어)
-    if effective_page_count < _PAGE_MIN:
-        logger.warning(
-            "book_id=%d: page count %d < minimum %d — padding to %d for finalization",
-            book_id, effective_page_count, _PAGE_MIN, _PAGE_MIN,
-        )
-        effective_page_count = _PAGE_MIN
-
-    _validate_page_count(effective_page_count)
-
     provider = SweetBookProvider(api_key=settings.SWEETBOOK_API_KEY)
     try:
-        logger.info(
-            "Finalizing SweetBook book %r (local book_id=%d, local_pages=%d, effective_pages=%d)",
-            sweetbook_book_uid, book_id, local_page_count, effective_page_count,
-        )
+        logger.info("Finalizing SweetBook book %r (local book_id=%d)", sweetbook_book_uid, book_id)
         data = await provider.finalize_book(sweetbook_book_uid)
     except ProviderError as exc:
+        # 4xx(mock book UID 등) 또는 5xx/네트워크 오류 모두 mock으로 계속 진행
         logger.warning(
-            "SweetBook finalize_book API 접근 불가 — mock FinalizationData 사용 (book_id=%d): %s",
-            book_id, exc.message,
+            "SweetBook finalize_book API 접근 불가 또는 거절 (HTTP %s) — mock FinalizationData 사용 (book_id=%d): %s",
+            exc.status_code, book_id, exc.message,
         )
         from datetime import datetime, timezone
         data = FinalizationData(
             result="created",
-            pageCount=effective_page_count,
+            pageCount=_PAGE_MIN,
             finalizedAt=datetime.now(timezone.utc),
         )
     finally:

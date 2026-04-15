@@ -1,0 +1,149 @@
+{
+    "uid": "8DGGFyjtOu0E",
+    "name": "내지",
+    "templateName": "내지",
+    "theme": "어린이동화",
+    "templateKind": "content",
+    "bookSpecUid": "SQUAREBOOK_HC",
+    "isPublic": false,
+    "layoutRules": {
+      "flow": {
+        "columnGap": 0,
+        "itemSpacing": {
+          "size": 8
+        }
+      },
+      "margin": {
+        "pageMargin": {
+          "head": 43,
+          "tail": 49,
+          "fore": 28,
+          "spine": 34
+        }
+      },
+      "shiftUpOnHide": false,
+      "pageSide": "left"
+    },
+    "layout": {
+      "backgroundColor": "#FFFFFFFF",
+      "elements": [
+        {
+          "element_id": "row-gallery",
+          "type": "rowGallery",
+          "position": {
+            "x": 0,
+            "y": 0
+          },
+          "width": 910.8216622061944,
+          "height": 781.9504615186484,
+          "tag": "rowGalleryB",
+          "photos": "$$image$$",
+          "fit": "cover",
+          "verticalAlignment": "Top",
+          "container": {
+            "maxWidth": 978,
+            "maxHeight": 0,
+            "itemGap": 10,
+            "row": {
+              "maxHeight": 400
+            }
+          },
+          "isDynamic": true,
+          "layoutMode": "flowFill",
+          "splittable": true,
+          "config": {
+            "max_row_height": 310,
+            "max_container_height": 0,
+            "photo_spacing": 4,
+            "container_padding": 0
+          }
+        },
+        {
+          "element_id": "text-h36jdhl1",
+          "type": "text",
+          "position": {
+            "x": 15.535013381416988,
+            "y": 788.9411105034212
+          },
+          "width": 859.0382842681375,
+          "height": 119.85888949657877,
+          "text": "$$text$$",
+          "fontFamily": "배달의민족 주아",
+          "fontSize": 35,
+          "textBold": false,
+          "textBrush": "#FF000000",
+          "textAlignment": "Left",
+          "verticalAlignment": "Top",
+          "isDynamic": false,
+          "splittable": false
+        }
+      ]
+    },
+    "baseLayer": {
+      "odd": {
+        "elements": [
+          {
+            "element_id": "bl-odd-pagenum",
+            "type": "text",
+            "position": {
+              "x": 855.17,
+              "y": 955.75
+            },
+            "width": 71.38,
+            "height": 20.12,
+            "text": "@@pageNum@@",
+            "fontFamily": "나눔고딕",
+            "fontSize": 12,
+            "textBold": false,
+            "textBrush": "#FF000000",
+            "backgroundColor": "#00FFFFFF",
+            "textAlignment": "Right",
+            "verticalAlignment": "Top",
+            "isDynamic": false,
+            "splittable": false
+          }
+        ]
+      },
+      "even": {
+        "elements": [
+          {
+            "element_id": "bl-even-pagenum",
+            "type": "text",
+            "position": {
+              "x": 51.45,
+              "y": 955.75
+            },
+            "width": 71.38,
+            "height": 20.12,
+            "text": "@@pageNum@@",
+            "fontFamily": "나눔고딕",
+            "fontSize": 12,
+            "textBold": false,
+            "textBrush": "#FF000000",
+            "backgroundColor": "#00FFFFFF",
+            "textAlignment": "Left",
+            "verticalAlignment": "Top",
+            "isDynamic": false,
+            "splittable": false
+          }
+        ]
+      }
+    },
+    "parameters": [
+      {
+        "name": "text",
+        "binding": "text",
+        "type": "string",
+        "required": true,
+        "defaultValue": "하지만 민지는 로봇들이 다른 로봇의 기계를 훔치는 것을 보았어요. 그녀는 마음이 아팠어요.",
+        "description": ""
+      },
+      {
+        "name": "image",
+        "binding": "file",
+        "type": "string",
+        "required": true,
+        "description": ""
+      }
+    ]
+  }
