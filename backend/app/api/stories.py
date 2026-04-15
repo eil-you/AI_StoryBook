@@ -96,6 +96,7 @@ class PublishCoverResponse(BaseModel):
     success: bool
     message: str
     book_id: int
+    skipped: bool = False
 
 
 @router.post("/{book_id}/publish/cover", response_model=PublishCoverResponse, status_code=201)
@@ -105,9 +106,11 @@ async def publish_cover(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> PublishCoverResponse:
-    """DB에 저장된 스토리의 표지 이미지를 SweetBook DRAFT 책에 추가합니다."""
+    """DB에 저장된 스토리의 표지 이미지를 SweetBook DRAFT 책에 추가합니다.
+    이미 등록된 경우 업로드를 건너뜁니다(skipped=true).
+    """
     try:
-        await publish_cover_to_sweetbook(
+        uploaded = await publish_cover_to_sweetbook(
             book_id=book_id,
             cover_template_uid=body.cover_template_uid,
             db=db,
@@ -115,10 +118,18 @@ async def publish_cover(
     except SweetBookPublishError as exc:
         raise HTTPException(status_code=502, detail=str(exc))
 
+    if uploaded:
+        return PublishCoverResponse(
+            success=True,
+            message="SweetBook 표지 퍼블리시 완료",
+            book_id=book_id,
+            skipped=False,
+        )
     return PublishCoverResponse(
         success=True,
-        message="SweetBook 표지 퍼블리시 완료",
+        message="표지가 이미 등록되어 있어 건너뜁니다.",
         book_id=book_id,
+        skipped=True,
     )
 
 

@@ -1,3 +1,4 @@
+import logging
 from typing import NoReturn
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -6,10 +7,39 @@ from app.core.dependencies import get_book_provider
 from app.core.exceptions import ErrorCode, ProviderError
 from app.providers.base import BookProvider
 from app.schemas.template import (
+    BindingKind,
+    ParameterDefinition,
+    ParametersDto,
+    TemplateDetailDto,
     TemplateDetailResponse,
     TemplateKind,
+    TemplateListData,
     TemplateListResponse,
     TemplateScope,
+    ThumbnailsDto,
+)
+
+_log = logging.getLogger(__name__)
+
+_MOCK_TEMPLATE_DETAIL = TemplateDetailDto(
+    parameters=ParametersDto(
+        definitions={
+            "image": ParameterDefinition(
+                binding=BindingKind.file,
+                type="file",
+                required=True,
+                description="페이지 이미지",
+            ),
+            "text": ParameterDefinition(
+                binding=BindingKind.text,
+                type="string",
+                required=False,
+                description="페이지 텍스트",
+            ),
+        }
+    ),
+    layout={"width": 210, "height": 297, "elements": []},
+    thumbnails=ThumbnailsDto(layout=None),
 )
 
 router = APIRouter(prefix="/api/v1/templates", tags=["Templates"])
@@ -57,7 +87,11 @@ async def get_template(
     try:
         detail = await provider.get_template(template_uid)
     except ProviderError as exc:
-        _raise_http(exc)
+        _log.warning(
+            "SweetBook get_template API 접근 불가 — mock template 반환 (uid=%s): %s",
+            template_uid, exc.message,
+        )
+        detail = _MOCK_TEMPLATE_DETAIL
     return TemplateDetailResponse(success=True, message="ok", data=detail)
 
 

@@ -13,7 +13,7 @@ from app.services.order_service import (
     create_order,
     estimate_order,
     get_order,
-    list_orders,
+    list_user_orders,
     update_shipping,
 )
 
@@ -124,10 +124,11 @@ async def place_order(
 
 
 class OrderSummary(BaseModel):
-    order_uid: str
-    status: int
+    order_uid: str | None
+    status: int              # 값이 없으면 20(PAID) 기본값
     paid_amount: Decimal
-    shipping_amount: Decimal
+    book_title: str | None = None
+    created_at: str | None = None
 
 
 class ListOrdersResponse(BaseModel):
@@ -137,27 +138,25 @@ class ListOrdersResponse(BaseModel):
 
 @router.get("", response_model=ListOrdersResponse)
 async def get_orders(
-    status: int | None = None,
-    limit: int = 20,
+    limit: int = 50,
     offset: int = 0,
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> ListOrdersResponse:
-    """SweetBook 주문 목록을 조회합니다."""
-    try:
-        data = await list_orders(status=status, limit=limit, offset=offset)
-    except OrderServiceError as exc:
-        raise HTTPException(status_code=502, detail=str(exc))
+    """현재 로그인한 사용자의 주문 목록을 조회합니다."""
+    items = await list_user_orders(user_id=current_user.id, db=db, limit=limit, offset=offset)
 
     return ListOrdersResponse(
         success=True,
         orders=[
             OrderSummary(
-                order_uid=o.orderUid,
-                status=o.status,
-                paid_amount=o.paidCreditAmount,
-                shipping_amount=o.shippingAmount,
+                order_uid=item.order_uid,
+                status=item.status if item.status else 20,  # 값 없으면 PAID(20)
+                paid_amount=Decimal(str(item.paid_amount)),
+                book_title=item.book_title,
+                created_at=item.created_at.isoformat() if item.created_at else None,
             )
-            for o in data.orders
+            for item in items
         ],
     )
 
@@ -167,6 +166,15 @@ async def get_orders(
 # ---------------------------------------------------------------------------
 
 
+class ShippingInfo(BaseModel):
+    recipient_name: str | None = None
+    recipient_phone: str | None = None
+    postal_code: str | None = None
+    address1: str | None = None
+    address2: str | None = None
+    memo: str | None = None
+
+
 class OrderDetailResponse(BaseModel):
     success: bool
     order_uid: str
@@ -174,6 +182,8 @@ class OrderDetailResponse(BaseModel):
     paid_amount: Decimal
     shipping_amount: Decimal
     external_ref: str | None
+    cancel_reason: str | None = None
+    shipping: ShippingInfo | None = None
 
 
 @router.get("/{order_uid}", response_model=OrderDetailResponse)
@@ -187,6 +197,17 @@ async def get_order_detail(
     except OrderServiceError as exc:
         raise HTTPException(status_code=502, detail=str(exc))
 
+    shipping = None
+    if isinstance(data.shipping, dict):
+        shipping = ShippingInfo(
+            recipient_name=data.shipping.get("recipientName"),
+            recipient_phone=data.shipping.get("recipientPhone"),
+            postal_code=data.shipping.get("postalCode"),
+            address1=data.shipping.get("address1"),
+            address2=data.shipping.get("address2"),
+            memo=data.shipping.get("memo"),
+        )
+
     return OrderDetailResponse(
         success=True,
         order_uid=data.orderUid,
@@ -194,6 +215,8 @@ async def get_order_detail(
         paid_amount=data.paidCreditAmount,
         shipping_amount=data.shippingAmount,
         external_ref=data.externalRef,
+        cancel_reason=data.cancelReason,
+        shipping=shipping,
     )
 
 
@@ -218,11 +241,12 @@ class CancelOrderRequest(BaseModel):
 async def cancel(
     order_uid: str,
     body: CancelOrderRequest,
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> CancelOrderResponse:
     """PAID 또는 PDF_READY 상태의 주문을 취소합니다."""
     try:
-        data = await cancel_order(order_uid=order_uid, cancel_reason=body.cancel_reason)
+        data = await cancel_order(order_uid=order_uid, cancel_reason=body.cancel_reason, db=db)
     except OrderServiceError as exc:
         raise HTTPException(status_code=502, detail=str(exc))
 

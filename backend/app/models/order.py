@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, Enum, ForeignKey, Numeric, func
+from sqlalchemy import DateTime, Enum, ForeignKey, Numeric, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
@@ -18,6 +18,9 @@ class Order(Base):
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     book_id: Mapped[int] = mapped_column(ForeignKey("books.id"), unique=True, nullable=False, index=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    sweetbook_order_uid: Mapped[str | None] = mapped_column(
+        String(100), nullable=True, unique=True, index=True
+    )
     status: Mapped[OrderStatus] = mapped_column(
         Enum(OrderStatus), default=OrderStatus.pending, nullable=False
     )

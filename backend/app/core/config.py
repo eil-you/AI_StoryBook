@@ -10,10 +10,12 @@ class Settings(BaseSettings):
     OPENAI_IMAGE_MODEL: str = "dall-e-3"
     DATABASE_URL: str = "sqlite:///./storybook.db"
 
-    AWS_ACCESS_KEY_ID: str
-    AWS_SECRET_ACCESS_KEY: str
+    AWS_ACCESS_KEY_ID: str = ""
+    AWS_SECRET_ACCESS_KEY: str = ""
     AWS_REGION: str = "ap-northeast-2"
-    AWS_S3_BUCKET: str
+    AWS_S3_BUCKET: str = ""
+
+    IMAGE_TEST_MODE: bool = True
 
     SECRET_KEY: str
     JWT_ALGORITHM: str = "HS256"

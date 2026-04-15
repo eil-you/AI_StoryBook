@@ -302,15 +302,58 @@ class SweetBookProvider(BookProvider):
             ) from exc
 
     async def get_template(self, template_uid: str) -> TemplateDetailDto:
-        """Fetch the full detail of a single template by its UID."""
+        """Fetch the full detail of a single template by its UID.
+
+        If the detail endpoint does not return a thumbnail URL, fall back to
+        the list endpoint to find the thumbnail for this template.
+        """
+        import logging
+        _log = logging.getLogger(__name__)
+
         raw = await self._get(f"/templates/{template_uid}")
         try:
-            return TemplateDetailResponse.model_validate(raw).data
+            detail = TemplateDetailResponse.model_validate(raw).data
         except ValidationError as exc:
             raise ProviderError(
                 code=ErrorCode.ERR002,
                 message=f"Unexpected template detail response for '{template_uid}': {exc}",
             ) from exc
+
+        _log.info(
+            "Template detail fetched uid=%s thumbnails=%s",
+            template_uid,
+            detail.thumbnails,
+        )
+
+        # If the detail endpoint didn't return a thumbnail URL, search the list.
+        if detail.thumbnails is None or detail.thumbnails.layout is None:
+            _log.info(
+                "Thumbnail missing in detail for uid=%s — searching list endpoint",
+                template_uid,
+            )
+            try:
+                list_data = await self.list_templates(limit=100)
+                for tmpl in list_data.templates:
+                    if tmpl.template_uid == template_uid:
+                        detail = TemplateDetailDto(
+                            parameters=detail.parameters,
+                            layout=detail.layout,
+                            layout_rules=detail.layout_rules,
+                            base_layer=detail.base_layer,
+                            thumbnails=tmpl.thumbnails,
+                        )
+                        _log.info(
+                            "Found thumbnail via list for uid=%s url=%s",
+                            template_uid,
+                            tmpl.thumbnails.layout if tmpl.thumbnails else None,
+                        )
+                        break
+            except Exception as exc:
+                _log.warning(
+                    "List-fallback for thumbnail failed uid=%s: %s", template_uid, exc
+                )
+
+        return detail
 
     async def add_cover(
         self,
@@ -368,13 +411,24 @@ class SweetBookProvider(BookProvider):
         if idempotency_key is not None:
             extra_headers["Idempotency-Key"] = idempotency_key
 
-        raw = await self._post_multipart(
-            f"/books/{book_uid}/contents",
-            data=form_data,
-            files=upload_files,
-            params=query_params or None,
-            extra_headers=extra_headers or None,
-        )
+        # /contents 엔드포인트는 항상 multipart/form-data를 요구함.
+        # httpx는 files 파라미터에 실제 파일이 있어야만 multipart를 사용하므로,
+        # 파일이 없는 경우(filler 등)에는 multipart body를 직접 조립해서 전송함.
+        if upload_files:
+            raw = await self._post_multipart(
+                f"/books/{book_uid}/contents",
+                data=form_data,
+                files=upload_files,
+                params=query_params or None,
+                extra_headers=extra_headers or None,
+            )
+        else:
+            raw = await self._post_multipart_fields_only(
+                f"/books/{book_uid}/contents",
+                data=form_data,
+                params=query_params or None,
+                extra_headers=extra_headers or None,
+            )
         try:
             return ContentResponse.model_validate(raw).data
         except ValidationError as exc:
@@ -594,6 +648,38 @@ class SweetBookProvider(BookProvider):
 
     async def _post(self, path: str, body: dict, extra_headers: dict | None = None) -> dict:
         return await self._request("POST", path, json=body, headers=extra_headers or {})
+
+    async def _post_multipart_fields_only(
+        self,
+        path: str,
+        data: dict[str, str],
+        params: dict[str, str] | None = None,
+        extra_headers: dict[str, str] | None = None,
+    ) -> dict:
+        """파일 없이 multipart/form-data로 POST 전송.
+
+        httpx는 files 파라미터에 실제 파일이 있어야 multipart를 사용하므로,
+        데이터 필드만 있는 경우 multipart body를 직접 조립해서 전송한다.
+        """
+        import secrets
+        boundary = secrets.token_hex(16)
+        body_parts: list[bytes] = []
+        for key, value in data.items():
+            body_parts.append(
+                f"--{boundary}\r\n"
+                f'Content-Disposition: form-data; name="{key}"\r\n'
+                f"\r\n"
+                f"{value}\r\n"
+            )
+        raw_body = "".join(body_parts) + f"--{boundary}--\r\n"
+        headers = {**(extra_headers or {}), "Content-Type": f"multipart/form-data; boundary={boundary}"}
+        return await self._request(
+            "POST",
+            path,
+            content=raw_body.encode(),
+            headers=headers,
+            params=params or {},
+        )
 
     async def _post_multipart(
         self,

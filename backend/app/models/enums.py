@@ -5,12 +5,14 @@ class BookStatus(str, enum.Enum):
     draft = "draft"
     processing = "processing"
     completed = "completed"
+    finalized = "finalized"
 
 
 class OrderStatus(str, enum.Enum):
     pending = "pending"
     paid = "paid"
     failed = "failed"
+    cancelled = "cancelled"
 
 
 class ErrorCode(enum.Enum):
