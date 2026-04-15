@@ -411,13 +411,29 @@ class SweetBookProvider(BookProvider):
         if idempotency_key is not None:
             extra_headers["Idempotency-Key"] = idempotency_key
 
-        raw = await self._post_multipart(
-            f"/books/{book_uid}/contents",
-            data=form_data,
-            files=upload_files,
-            params=query_params or None,
-            extra_headers=extra_headers or None,
-        )
+        if upload_files:
+            # 파일이 있을 때만 multipart/form-data 사용
+            raw = await self._post_multipart(
+                f"/books/{book_uid}/contents",
+                data=form_data,
+                files=upload_files,
+                params=query_params or None,
+                extra_headers=extra_headers or None,
+            )
+        else:
+            # 파일이 없는 경우(filler 등) JSON POST 사용 — multipart 시 415 오류 방지
+            json_body: dict = {"templateUid": template_uid}
+            if parameters is not None:
+                json_body["parameters"] = parameters
+            if from_ is not None:
+                json_body["from"] = from_
+            raw = await self._request(
+                "POST",
+                f"/books/{book_uid}/contents",
+                json=json_body,
+                params=query_params or {},
+                headers=extra_headers or {},
+            )
         try:
             return ContentResponse.model_validate(raw).data
         except ValidationError as exc:

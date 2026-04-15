@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { cancelOrder, getOrder, listOrders, updateShipping } from "../api/orders";
 import Layout from "../components/Layout";
 import LoadingSpinner from "../components/LoadingSpinner";
@@ -420,6 +421,7 @@ function Toast({ message, type = "success", onDismiss }) {
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export default function OrderHistoryPage() {
+  const navigate = useNavigate();
   const [orders, setOrders]   = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError]     = useState("");
@@ -460,12 +462,14 @@ export default function OrderHistoryPage() {
               결제 완료 · PDF 준비 상태에서 취소 및 배송지 변경이 가능합니다
             </p>
           </div>
-          <button
-            onClick={fetchOrders}
-            className="btn-secondary text-sm"
-          >
-            새로고침
-          </button>
+          <div className="flex gap-2">
+            <button onClick={fetchOrders} className="btn-secondary text-sm">
+              새로고침
+            </button>
+            <button onClick={() => navigate("/dashboard")} className="btn-primary text-sm">
+              대시보드로
+            </button>
+          </div>
         </div>
 
         {/* Status legend */}

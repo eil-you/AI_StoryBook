@@ -9,8 +9,16 @@ from app.services.image_storage import download_and_save
 
 logger = logging.getLogger(__name__)
 
-_SYSTEM_PROMPT = """You are a creative children's book author.
-When given story details, generate an engaging and age-appropriate story.
+_SYSTEM_PROMPT = """You are a creative children's book author specializing in age-appropriate storytelling.
+When given story details, generate an engaging story carefully calibrated to the child's age level.
+
+AGE-APPROPRIATE WRITING GUIDELINES:
+- Ages 1-3 (Toddler): Very simple sentences (3-5 words each). Repetitive patterns. Basic concepts only. Onomatopoeia and sound words. Familiar objects and animals.
+- Ages 4-6 (Preschool): Simple sentences (5-8 words). Gentle adventures. Emotions and friendships. Easy vocabulary. Rhymes welcome.
+- Ages 7-9 (Early reader): Moderate complexity. Short paragraphs. Light problem-solving. Expanding vocabulary with context clues.
+- Ages 10-13 (Middle grade): Richer descriptions. Character development. Moral dilemmas. More sophisticated vocabulary.
+- Ages 14+ (Young adult): Complex narratives. Nuanced emotions. Challenging vocabulary. Deeper themes.
+
 You MUST respond with valid JSON only, in this exact format:
 {
   "title": "Story Title Here",
@@ -22,6 +30,7 @@ You MUST respond with valid JSON only, in this exact format:
 }
 The pages array MUST have between 24 and 30 paragraphs. This is a hard requirement — do NOT return fewer than 24 paragraphs under any circumstances.
 Keep each paragraph short (2-4 sentences) so the story flows naturally page by page.
+The title and all page text MUST be written in Korean.
 Do not include any text outside the JSON object."""
 
 _IMAGE_STYLE = (
@@ -137,13 +146,27 @@ class AIService:
         background: str,
         education: str,
     ) -> str:
+        # 나이대별 독서 수준 설명 추가
+        if character_age <= 3:
+            age_guidance = "toddler level (ages 1-3): extremely simple words, very short sentences, lots of repetition"
+        elif character_age <= 6:
+            age_guidance = "preschool level (ages 4-6): simple sentences, gentle story, easy vocabulary"
+        elif character_age <= 9:
+            age_guidance = "early reader level (ages 7-9): moderate sentences, light adventure, growing vocabulary"
+        elif character_age <= 13:
+            age_guidance = "middle grade level (ages 10-13): richer descriptions, character growth, varied vocabulary"
+        else:
+            age_guidance = "young adult level (ages 14+): complex narrative, nuanced emotions, sophisticated vocabulary"
+
         return (
-            f"Write a children's story with the following details:\n"
+            f"Write a children's story in Korean with the following details:\n"
             f"- Main character name: {character_name}\n"
-            f"- Main character age: {character_age}\n"
+            f"- Main character age: {character_age} years old\n"
+            f"- Reading level: {age_guidance}\n"
             f"- Genre: {genre}\n"
             f"- Background/Setting: {background}\n"
-            f"- Educational value to convey: {education}"
+            f"- Educational value to convey: {education}\n\n"
+            f"IMPORTANT: Adjust ALL vocabulary, sentence length, and story complexity to exactly match the {character_age}-year-old reading level described above."
         )
 
     async def _call_openai(self, user_message: str) -> str:
