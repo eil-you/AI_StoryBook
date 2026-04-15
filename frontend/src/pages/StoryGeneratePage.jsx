@@ -48,13 +48,9 @@ function ChipSelect({ options, value, onChange, placeholder }) {
 
 export default function StoryGeneratePage() {
   const navigate = useNavigate();
-
   const [step, setStep]       = useState(1);
   const [loading, setLoading] = useState(false);
   const [error, setError]     = useState("");
-
-  // generated: null | { book_id, data: StoryData }
-  const [generated, setGenerated] = useState(null);
 
   const [form, setForm] = useState({
     character_name: "",
@@ -74,27 +70,18 @@ export default function StoryGeneratePage() {
     return true;
   };
 
-  // 동화 만들기 — 완료 후 같은 화면에 결과 표시
   const handleGenerate = async () => {
     setError("");
-    setGenerated(null);
     setLoading(true);
     try {
       const result = await generateStory(form);
-      setGenerated({ book_id: result.book_id, data: result.data });
+      navigate(`/story/${result.book_id}/preview`, {
+        state: { storyData: result.data },
+      });
     } catch (err) {
       setError(err.response?.data?.detail || "스토리 생성에 실패했습니다.");
-    } finally {
       setLoading(false);
     }
-  };
-
-  // 주문하기 — 미리보기 페이지로 이동 (주문 준비 완료 버튼이 있음)
-  const handleOrder = () => {
-    if (!generated) return;
-    navigate(`/story/${generated.book_id}/preview`, {
-      state: { storyData: generated.data },
-    });
   };
 
   return (
@@ -161,7 +148,6 @@ export default function StoryGeneratePage() {
                   value={form.character_age}
                   onChange={(e) => {
                     update("character_age", Number(e.target.value));
-                    setGenerated(null); // 나이 바뀌면 기존 결과 초기화
                   }}
                   className="w-full accent-primary-600"
                 />
@@ -191,7 +177,7 @@ export default function StoryGeneratePage() {
                 <ChipSelect
                   options={GENRES}
                   value={form.genre}
-                  onChange={(v) => { update("genre", v); setGenerated(null); }}
+                  onChange={(v) => update("genre", v)}
                   placeholder="직접 입력..."
                 />
               </div>
@@ -200,7 +186,7 @@ export default function StoryGeneratePage() {
                 <ChipSelect
                   options={BACKGROUNDS}
                   value={form.background}
-                  onChange={(v) => { update("background", v); setGenerated(null); }}
+                  onChange={(v) => update("background", v)}
                   placeholder="직접 입력..."
                 />
               </div>
@@ -216,7 +202,7 @@ export default function StoryGeneratePage() {
                 <ChipSelect
                   options={EDUCATIONS}
                   value={form.education}
-                  onChange={(v) => { update("education", v); setGenerated(null); }}
+                  onChange={(v) => update("education", v)}
                   placeholder="직접 입력..."
                 />
               </div>
@@ -230,24 +216,6 @@ export default function StoryGeneratePage() {
                 <p>교육 가치: <strong>{form.education}</strong></p>
               </div>
 
-              {/* 생성 완료 결과 카드 */}
-              {generated && (
-                <div className="bg-green-50 border border-green-200 rounded-xl p-4 flex items-center gap-4">
-                  {generated.data.cover_image_url && (
-                    <img
-                      src={generated.data.cover_image_url}
-                      alt="표지"
-                      className="w-16 h-16 rounded-lg object-cover shrink-0"
-                    />
-                  )}
-                  <div className="flex-1 min-w-0">
-                    <p className="text-green-700 font-semibold text-sm mb-0.5">동화 생성 완료!</p>
-                    <p className="font-bold text-gray-900 truncate">{generated.data.title}</p>
-                    <p className="text-xs text-gray-500 mt-0.5">{generated.data.pages?.length ?? 0}페이지</p>
-                  </div>
-                  <span className="text-2xl">✅</span>
-                </div>
-              )}
             </div>
           )}
 
@@ -280,41 +248,22 @@ export default function StoryGeneratePage() {
                 다음
               </button>
             ) : (
-              /* Step 3 — 동화 만들기 + 주문하기 */
-              <>
-                {/* 동화 만들기 */}
-                <button
-                  type="button"
-                  onClick={handleGenerate}
-                  disabled={loading || !canNext()}
-                  className="btn-primary flex-1"
-                >
-                  {loading ? (
-                    <span className="flex items-center justify-center gap-2">
-                      <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                      AI가 동화를 쓰고 있어요...
-                    </span>
-                  ) : generated ? (
-                    "다시 만들기 🔄"
-                  ) : (
-                    "동화 만들기 ✨"
-                  )}
-                </button>
-
-                {/* 주문하기 — 생성 완료 후 활성화 */}
-                <button
-                  type="button"
-                  onClick={handleOrder}
-                  disabled={!generated || loading}
-                  className={`flex-1 font-semibold py-2 px-4 rounded-lg transition-colors
-                    ${generated && !loading
-                      ? "bg-green-600 hover:bg-green-700 text-white"
-                      : "bg-gray-200 text-gray-400 cursor-not-allowed"
-                    }`}
-                >
-                  주문하기 →
-                </button>
-              </>
+              /* Step 3 — 동화 만들기 */
+              <button
+                type="button"
+                onClick={handleGenerate}
+                disabled={loading || !canNext()}
+                className="btn-primary flex-1"
+              >
+                {loading ? (
+                  <span className="flex items-center justify-center gap-2">
+                    <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    AI가 동화를 쓰고 있어요...
+                  </span>
+                ) : (
+                  "동화 만들기 ✨"
+                )}
+              </button>
             )}
           </div>
         </div>
