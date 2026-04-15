@@ -1,17 +1,11 @@
 import json
-from decimal import Decimal
 
 import httpx
-from pydantic import BaseModel, HttpUrl, ValidationError, field_validator
-
+from pydantic import BaseModel, ValidationError
+from decimal import Decimal
 from app.core.exceptions import ErrorCode, ProviderError
-from app.providers.base import (
-    BookOrderRequest,
-    BookOrderResponse,
-    BookProvider,
-    OrderStatusResponse,
-)
-from app.schemas.book import BookListData, BookListResponse, CreateBookData, CreateBookResponse
+from app.providers.base import BookProvider
+from app.schemas.book import CreateBookData, CreateBookResponse
 from app.schemas.content import ContentData, ContentResponse
 from app.schemas.cover import CoverData, CoverResponse
 from app.schemas.finalization import FinalizationData, FinalizationResponse
@@ -25,12 +19,9 @@ from app.schemas.order import (
     OrderDto,
     OrderDetailResponse,
     OrderItemPayload,
-    OrderListData,
-    OrderListResponse,
     ShippingPayload,
 )
 from app.schemas.image import PhotoListData, PhotoListResponse, UploadPhotoData, UploadPhotoResponse
-from app.schemas.book_spec import BookSpecDto, BookSpecListResponse, BookSpecResponse
 from app.schemas.template import (
     TemplateDetailDto,
     TemplateDetailResponse,
@@ -39,60 +30,6 @@ from app.schemas.template import (
 )
 
 _BASE_URL = "https://api-sandbox.sweetbook.com/v1"
-
-
-# ---------------------------------------------------------------------------
-# Outbound payload models  (validated before the request is sent)
-# ---------------------------------------------------------------------------
-
-
-class _PagePayload(BaseModel):
-    page_number: int
-    text: str | None = None
-    image_url: str | None = None
-
-    @field_validator("page_number")
-    @classmethod
-    def page_number_must_be_positive(cls, v: int) -> int:
-        if v < 1:
-            raise ValueError("page_number must be ≥ 1")
-        return v
-
-
-class _CreateOrderPayload(BaseModel):
-    reference_id: str
-    title: str
-    pages: list[_PagePayload]
-
-    @field_validator("title")
-    @classmethod
-    def title_must_not_be_blank(cls, v: str) -> str:
-        if not v.strip():
-            raise ValueError("title must not be blank")
-        return v
-
-    @field_validator("pages")
-    @classmethod
-    def pages_must_not_be_empty(cls, v: list[_PagePayload]) -> list[_PagePayload]:
-        if not v:
-            raise ValueError("pages must contain at least one page")
-        return v
-
-
-# ---------------------------------------------------------------------------
-# Inbound response models  (validated after the response is received)
-# ---------------------------------------------------------------------------
-
-
-class _OrderResponseData(BaseModel):
-    order_id: str
-    status: str
-    total_price: Decimal
-
-
-class _OrderStatusData(BaseModel):
-    order_id: str
-    status: str
 
 
 class _PricingData(BaseModel):
@@ -125,65 +62,6 @@ class SweetBookProvider(BookProvider):
             timeout=30.0,
         )
 
-    # ------------------------------------------------------------------
-    # BookProvider interface
-    # ------------------------------------------------------------------
-
-    async def create_order(self, request: BookOrderRequest) -> BookOrderResponse:
-        # --- 1. Validate outbound payload ---
-        try:
-            payload = _CreateOrderPayload(
-                reference_id=str(request.book_id),
-                title=request.title,
-                pages=[
-                    _PagePayload(
-                        page_number=p.page_number,
-                        text=p.text_content,
-                        image_url=p.image_url,
-                    )
-                    for p in request.pages
-                ],
-            )
-        except ValidationError as exc:
-            raise ProviderError(
-                code=ErrorCode.ERR001,
-                message=f"Order payload validation failed: {exc}",
-            ) from exc
-
-        # --- 2. Send request ---
-        raw = await self._post("/orders", payload.model_dump())
-
-        # --- 3. Validate inbound response ---
-        try:
-            data = _OrderResponseData.model_validate(raw)
-        except ValidationError as exc:
-            raise ProviderError(
-                code=ErrorCode.ERR002,
-                message=f"Unexpected response shape from Sweet Book API: {exc}",
-            ) from exc
-
-        return BookOrderResponse(
-            provider_order_id=data.order_id,
-            status=data.status,
-            total_price=data.total_price,
-        )
-
-    async def get_order_status(self, provider_order_id: str) -> OrderStatusResponse:
-        raw = await self._get(f"/orders/{provider_order_id}")
-
-        try:
-            data = _OrderStatusData.model_validate(raw)
-        except ValidationError as exc:
-            raise ProviderError(
-                code=ErrorCode.ERR002,
-                message=f"Unexpected status response from Sweet Book API: {exc}",
-            ) from exc
-
-        return OrderStatusResponse(
-            provider_order_id=data.order_id,
-            status=data.status,
-        )
-
     async def create_book(
         self,
         title: str,
@@ -213,51 +91,6 @@ class SweetBookProvider(BookProvider):
             raise ProviderError(
                 code=ErrorCode.ERR002,
                 message=f"Unexpected create-book response: {exc}",
-            ) from exc
-
-    async def list_books(
-        self,
-        book_uid: str | None = None,
-        status: str | None = None,
-        limit: int = 20,
-        offset: int = 0,
-    ) -> BookListData:
-        """Fetch a paginated list of books with optional filters."""
-        params: dict[str, str | int] = {"limit": limit, "offset": offset}
-        if book_uid is not None:
-            params["bookUid"] = book_uid
-        if status is not None:
-            params["status"] = status
-
-        raw = await self._get("/books", params=params)
-        try:
-            return BookListResponse.model_validate(raw).data
-        except ValidationError as exc:
-            raise ProviderError(
-                code=ErrorCode.ERR002,
-                message=f"Unexpected books list response: {exc}",
-            ) from exc
-
-    async def list_book_specs(self) -> list[BookSpecDto]:
-        """Fetch all available book specifications."""
-        raw = await self._get("/book-specs")
-        try:
-            return BookSpecListResponse.model_validate(raw).data
-        except ValidationError as exc:
-            raise ProviderError(
-                code=ErrorCode.ERR002,
-                message=f"Unexpected book-specs list response: {exc}",
-            ) from exc
-
-    async def get_book_spec(self, book_spec_uid: str) -> BookSpecDto:
-        """Fetch a single book specification by its UID."""
-        raw = await self._get(f"/book-specs/{book_spec_uid}")
-        try:
-            return BookSpecResponse.model_validate(raw).data
-        except ValidationError as exc:
-            raise ProviderError(
-                code=ErrorCode.ERR002,
-                message=f"Unexpected book-spec response for '{book_spec_uid}': {exc}",
             ) from exc
 
     async def list_templates(
@@ -523,26 +356,6 @@ class SweetBookProvider(BookProvider):
             raise ProviderError(
                 code=ErrorCode.ERR002,
                 message=f"Unexpected create-order response: {exc}",
-            ) from exc
-
-    async def list_orders(
-        self,
-        status: int | None = None,
-        limit: int = 20,
-        offset: int = 0,
-    ) -> OrderListData:
-        """Fetch a paginated list of orders with optional status filter."""
-        params: dict[str, int] = {"limit": limit, "offset": offset}
-        if status is not None:
-            params["status"] = status
-
-        raw = await self._get("/orders", params=params)
-        try:
-            return OrderListResponse.model_validate(raw).data
-        except ValidationError as exc:
-            raise ProviderError(
-                code=ErrorCode.ERR002,
-                message=f"Unexpected orders list response: {exc}",
             ) from exc
 
     async def get_order(self, order_uid: str) -> OrderDto:
